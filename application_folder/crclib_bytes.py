@@ -1,11 +1,8 @@
 ﻿#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # Cyclic Recundary Check 7 bits: 4 bits for data, 3 for checksum
-# PLEASE, DON'T Change Anything in this file
 # Code is written for using with IronPython in .Net environment.
-
 import codecs
-
 synd_table = {
     0b001: 0b0000001,
     0b010: 0b0000010,
@@ -77,7 +74,6 @@ def decode_data(data):
     data = bytearray(data)
     decoded_bytes = bytearray(b"")
     code = 0
-
     #Note, this condition must always be false
     if len(data) % 2 != 0:
         data.pop(len(data) - 1)
