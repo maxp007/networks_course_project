@@ -50,9 +50,8 @@
             this.порт2ToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripComboBox2 = new System.Windows.Forms.ToolStripComboBox();
             this.дополнительноToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.toolStripTextBox1 = new System.Windows.Forms.ToolStripTextBox();
-            this.открытьПортыToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.button3 = new System.Windows.Forms.Button();
+            this.toolStripMenuItem2 = new System.Windows.Forms.ToolStripMenuItem();
+            this.AuthConnectButton = new System.Windows.Forms.Button();
             this.ReceiverComboBox = new System.Windows.Forms.ComboBox();
             this.label1 = new System.Windows.Forms.Label();
             this.label2 = new System.Windows.Forms.Label();
@@ -67,7 +66,9 @@
             this.button2 = new System.Windows.Forms.Button();
             this.button5 = new System.Windows.Forms.Button();
             this.label8 = new System.Windows.Forms.Label();
-            this.button6 = new System.Windows.Forms.Button();
+            this.LogintextBox = new System.Windows.Forms.TextBox();
+            this.Loginlabel = new System.Windows.Forms.Label();
+            this.AuthDisconnectButton = new System.Windows.Forms.Button();
             this.menuStrip1.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -76,8 +77,8 @@
             this.serialPort1.DataBits = 7;
             this.serialPort1.PortName = "NULL";
             this.serialPort1.RtsEnable = true;
-            this.serialPort1.PinChanged += new System.IO.Ports.SerialPinChangedEventHandler(this.serialPort1_PinChanged);
-            this.serialPort1.DataReceived += new System.IO.Ports.SerialDataReceivedEventHandler(this.serialPort1_DataReceived);
+            
+            
             // 
             // textBox1
             // 
@@ -100,9 +101,9 @@
             // 
             // SendNewLetterButton
             // 
-            this.SendNewLetterButton.Location = new System.Drawing.Point(563, 233);
+            this.SendNewLetterButton.Location = new System.Drawing.Point(549, 263);
             this.SendNewLetterButton.Name = "SendNewLetterButton";
-            this.SendNewLetterButton.Size = new System.Drawing.Size(100, 26);
+            this.SendNewLetterButton.Size = new System.Drawing.Size(103, 63);
             this.SendNewLetterButton.TabIndex = 11;
             this.SendNewLetterButton.Text = "Отправить";
             this.SendNewLetterButton.UseVisualStyleBackColor = true;
@@ -112,8 +113,7 @@
             // 
             this.serialPort2.DataBits = 7;
             this.serialPort2.PortName = "NULL";
-            this.serialPort2.PinChanged += new System.IO.Ports.SerialPinChangedEventHandler(this.serialPort2_PinChanged);
-            this.serialPort2.DataReceived += new System.IO.Ports.SerialDataReceivedEventHandler(this.serialPort2_DataReceived);
+            
             // 
             // label4
             // 
@@ -125,9 +125,9 @@
             // 
             // button1
             // 
-            this.button1.Location = new System.Drawing.Point(485, 32);
+            this.button1.Location = new System.Drawing.Point(481, 32);
             this.button1.Name = "button1";
-            this.button1.Size = new System.Drawing.Size(90, 25);
+            this.button1.Size = new System.Drawing.Size(95, 23);
             this.button1.TabIndex = 35;
             this.button1.Text = "Отрыть порты";
             this.button1.UseVisualStyleBackColor = true;
@@ -140,7 +140,7 @@
             this.настройкаПортовToolStripMenuItem});
             this.menuStrip1.Location = new System.Drawing.Point(0, 0);
             this.menuStrip1.Name = "menuStrip1";
-            this.menuStrip1.Size = new System.Drawing.Size(686, 24);
+            this.menuStrip1.Size = new System.Drawing.Size(678, 24);
             this.menuStrip1.TabIndex = 36;
             this.menuStrip1.Text = "menuStrip1";
             // 
@@ -173,8 +173,7 @@
             this.скоростьToolStripMenuItem,
             this.порт1ToolStripMenuItem,
             this.порт2ToolStripMenuItem,
-            this.дополнительноToolStripMenuItem,
-            this.открытьПортыToolStripMenuItem});
+            this.дополнительноToolStripMenuItem});
             this.настройкаПортовToolStripMenuItem.Name = "настройкаПортовToolStripMenuItem";
             this.настройкаПортовToolStripMenuItem.Size = new System.Drawing.Size(120, 20);
             this.настройкаПортовToolStripMenuItem.Text = "Настройка портов";
@@ -250,31 +249,27 @@
             // дополнительноToolStripMenuItem
             // 
             this.дополнительноToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.toolStripTextBox1});
+            this.toolStripMenuItem2});
             this.дополнительноToolStripMenuItem.Name = "дополнительноToolStripMenuItem";
             this.дополнительноToolStripMenuItem.Size = new System.Drawing.Size(162, 22);
             this.дополнительноToolStripMenuItem.Text = "Дополнительно";
             // 
-            // toolStripTextBox1
+            // toolStripMenuItem2
             // 
-            this.toolStripTextBox1.Name = "toolStripTextBox1";
-            this.toolStripTextBox1.Size = new System.Drawing.Size(100, 23);
+            this.toolStripMenuItem2.Name = "toolStripMenuItem2";
+            this.toolStripMenuItem2.Size = new System.Drawing.Size(118, 22);
+            this.toolStripMenuItem2.Text = "справка";
+            this.toolStripMenuItem2.Click += new System.EventHandler(this.toolStripMenuItem2_Click);
             // 
-            // открытьПортыToolStripMenuItem
+            // AuthConnectButton
             // 
-            this.открытьПортыToolStripMenuItem.Name = "открытьПортыToolStripMenuItem";
-            this.открытьПортыToolStripMenuItem.Size = new System.Drawing.Size(162, 22);
-            this.открытьПортыToolStripMenuItem.Text = "Открыть порты";
-            // 
-            // button3
-            // 
-            this.button3.Location = new System.Drawing.Point(496, 94);
-            this.button3.Name = "button3";
-            this.button3.Size = new System.Drawing.Size(150, 26);
-            this.button3.TabIndex = 37;
-            this.button3.Text = "Подключиться к сети";
-            this.button3.UseVisualStyleBackColor = true;
-            this.button3.Click += new System.EventHandler(this.button3_Click);
+            this.AuthConnectButton.Location = new System.Drawing.Point(485, 130);
+            this.AuthConnectButton.Name = "AuthConnectButton";
+            this.AuthConnectButton.Size = new System.Drawing.Size(100, 22);
+            this.AuthConnectButton.TabIndex = 37;
+            this.AuthConnectButton.Text = "Авторизоваться";
+            this.AuthConnectButton.UseVisualStyleBackColor = true;
+            this.AuthConnectButton.Click += new System.EventHandler(this.AuthConnectButton_Click);
             // 
             // ReceiverComboBox
             // 
@@ -287,43 +282,41 @@
             // label1
             // 
             this.label1.AutoSize = true;
-            this.label1.Location = new System.Drawing.Point(482, 125);
+            this.label1.Location = new System.Drawing.Point(482, 98);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(73, 13);
+            this.label1.Size = new System.Drawing.Size(0, 13);
             this.label1.TabIndex = 41;
-            this.label1.Text = "Адрес в сети";
             // 
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(561, 125);
+            this.label2.Location = new System.Drawing.Point(488, 117);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(28, 13);
+            this.label2.Size = new System.Drawing.Size(0, 13);
             this.label2.TabIndex = 42;
-            this.label2.Text = "addr";
             // 
             // port1state_label
             // 
             this.port1state_label.AutoSize = true;
-            this.port1state_label.Location = new System.Drawing.Point(542, 60);
+            this.port1state_label.Location = new System.Drawing.Point(546, 72);
             this.port1state_label.Name = "port1state_label";
-            this.port1state_label.Size = new System.Drawing.Size(55, 13);
+            this.port1state_label.Size = new System.Drawing.Size(78, 13);
             this.port1state_label.TabIndex = 43;
-            this.port1state_label.Text = "отключен";
+            this.port1state_label.Text = "Порт1 закрыт";
             // 
             // port2state_label
             // 
             this.port2state_label.AutoSize = true;
-            this.port2state_label.Location = new System.Drawing.Point(542, 78);
+            this.port2state_label.Location = new System.Drawing.Point(546, 85);
             this.port2state_label.Name = "port2state_label";
-            this.port2state_label.Size = new System.Drawing.Size(55, 13);
+            this.port2state_label.Size = new System.Drawing.Size(78, 13);
             this.port2state_label.TabIndex = 44;
-            this.port2state_label.Text = "отключен";
+            this.port2state_label.Text = "Порт2 закрыт";
             // 
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(482, 60);
+            this.label3.Location = new System.Drawing.Point(482, 72);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(61, 13);
             this.label3.TabIndex = 45;
@@ -332,7 +325,7 @@
             // label5
             // 
             this.label5.AutoSize = true;
-            this.label5.Location = new System.Drawing.Point(482, 78);
+            this.label5.Location = new System.Drawing.Point(482, 85);
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(58, 13);
             this.label5.TabIndex = 46;
@@ -340,9 +333,9 @@
             // 
             // button4
             // 
-            this.button4.Location = new System.Drawing.Point(581, 34);
+            this.button4.Location = new System.Drawing.Point(582, 32);
             this.button4.Name = "button4";
-            this.button4.Size = new System.Drawing.Size(96, 23);
+            this.button4.Size = new System.Drawing.Size(95, 23);
             this.button4.TabIndex = 47;
             this.button4.Text = "Закрыть Порты";
             this.button4.UseVisualStyleBackColor = true;
@@ -375,9 +368,9 @@
             // 
             // button2
             // 
-            this.button2.Location = new System.Drawing.Point(485, 179);
+            this.button2.Location = new System.Drawing.Point(691, 0);
             this.button2.Name = "button2";
-            this.button2.Size = new System.Drawing.Size(95, 23);
+            this.button2.Size = new System.Drawing.Size(10, 10);
             this.button2.TabIndex = 51;
             this.button2.Text = "SetInboxUpdate";
             this.button2.UseVisualStyleBackColor = true;
@@ -385,9 +378,9 @@
             // 
             // button5
             // 
-            this.button5.Location = new System.Drawing.Point(591, 179);
+            this.button5.Location = new System.Drawing.Point(679, 0);
             this.button5.Name = "button5";
-            this.button5.Size = new System.Drawing.Size(95, 23);
+            this.button5.Size = new System.Drawing.Size(10, 10);
             this.button5.TabIndex = 52;
             this.button5.Text = "SetOutboxUpdate";
             this.button5.UseVisualStyleBackColor = true;
@@ -396,29 +389,46 @@
             // label8
             // 
             this.label8.AutoSize = true;
-            this.label8.Location = new System.Drawing.Point(528, 163);
+            this.label8.Location = new System.Drawing.Point(482, 125);
             this.label8.Name = "label8";
-            this.label8.Size = new System.Drawing.Size(135, 13);
+            this.label8.Size = new System.Drawing.Size(0, 13);
             this.label8.TabIndex = 53;
-            this.label8.Text = "обновление папки писем";
             // 
-            // button6
+            // LogintextBox
             // 
-            this.button6.Location = new System.Drawing.Point(563, 265);
-            this.button6.Name = "button6";
-            this.button6.Size = new System.Drawing.Size(100, 26);
-            this.button6.TabIndex = 54;
-            this.button6.Text = "to bytes";
-            this.button6.UseVisualStyleBackColor = true;
-            this.button6.Click += new System.EventHandler(this.button6_Click);
+            this.LogintextBox.Location = new System.Drawing.Point(550, 104);
+            this.LogintextBox.Name = "LogintextBox";
+            this.LogintextBox.Size = new System.Drawing.Size(126, 20);
+            this.LogintextBox.TabIndex = 55;
+            // 
+            // Loginlabel
+            // 
+            this.Loginlabel.AutoSize = true;
+            this.Loginlabel.Location = new System.Drawing.Point(482, 107);
+            this.Loginlabel.Name = "Loginlabel";
+            this.Loginlabel.Size = new System.Drawing.Size(62, 13);
+            this.Loginlabel.TabIndex = 56;
+            this.Loginlabel.Text = "Ваш Логин";
+            // 
+            // AuthDisconnectButton
+            // 
+            this.AuthDisconnectButton.Location = new System.Drawing.Point(591, 130);
+            this.AuthDisconnectButton.Name = "AuthDisconnectButton";
+            this.AuthDisconnectButton.Size = new System.Drawing.Size(85, 22);
+            this.AuthDisconnectButton.TabIndex = 57;
+            this.AuthDisconnectButton.Text = "выйти";
+            this.AuthDisconnectButton.UseVisualStyleBackColor = true;
+            this.AuthDisconnectButton.Click += new System.EventHandler(this.AuthDisconnectButton_click);
             // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.SystemColors.HighlightText;
-            this.ClientSize = new System.Drawing.Size(686, 338);
-            this.Controls.Add(this.button6);
+            this.ClientSize = new System.Drawing.Size(678, 338);
+            this.Controls.Add(this.AuthDisconnectButton);
+            this.Controls.Add(this.Loginlabel);
+            this.Controls.Add(this.LogintextBox);
             this.Controls.Add(this.label8);
             this.Controls.Add(this.button5);
             this.Controls.Add(this.button2);
@@ -433,7 +443,7 @@
             this.Controls.Add(this.label2);
             this.Controls.Add(this.label1);
             this.Controls.Add(this.ReceiverComboBox);
-            this.Controls.Add(this.button3);
+            this.Controls.Add(this.AuthConnectButton);
             this.Controls.Add(this.menuStrip1);
             this.Controls.Add(this.button1);
             this.Controls.Add(this.label4);
@@ -468,8 +478,7 @@
         private System.Windows.Forms.ToolStripMenuItem порт1ToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem порт2ToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem дополнительноToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem открытьПортыToolStripMenuItem;
-        private System.Windows.Forms.Button button3;
+        private System.Windows.Forms.Button AuthConnectButton;
         private System.Windows.Forms.ComboBox ReceiverComboBox;
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Label label2;
@@ -489,8 +498,10 @@
         private System.Windows.Forms.Button button2;
         private System.Windows.Forms.Button button5;
         private System.Windows.Forms.Label label8;
-        private System.Windows.Forms.Button button6;
-        private System.Windows.Forms.ToolStripTextBox toolStripTextBox1;
+        private System.Windows.Forms.TextBox LogintextBox;
+        private System.Windows.Forms.Label Loginlabel;
+        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem2;
+        private System.Windows.Forms.Button AuthDisconnectButton;
     }
 }
 

@@ -19,6 +19,7 @@ namespace main_application
         public bool UpdateThread_to_close = false;
         public Form2(Form1 form)
         {
+            
             UpdateThread_to_close = false;
             this.form1 = form;
             InitializeComponent();
@@ -34,6 +35,29 @@ namespace main_application
             {
                 dataGridView1.DataSource = db.inbox.ToList();
             }
+            dataGridView1.Columns[4].Visible = false;
+            dataGridView1.Columns[6].Visible = false;
+            dataGridView1.Columns[0].Width = 20;
+            dataGridView1.Columns[1].Width = 50;
+            dataGridView1.Columns[2].Width = 50; 
+            dataGridView1.Columns[3].Width = 80;
+            dataGridView1.Columns[5].Width = 90;
+            dataGridView1.Columns[7].Width = 70;
+            foreach (DataGridViewRow row in dataGridView1.Rows)
+            {
+                if (row.Cells[5].Value.ToString() == "Принято")
+                {
+                    row.DefaultCellStyle.BackColor = Color.AliceBlue;
+
+                }
+                if (row.Cells[5].Value.ToString() == "Прочитано")
+                {
+                    row.DefaultCellStyle.BackColor = Color.LightCyan;
+                }
+            }
+            dataGridView1.Update();
+            dataGridView1.Refresh();
+
         }
 
         private void Form2_Load(object sender, EventArgs e)
@@ -51,33 +75,39 @@ namespace main_application
         public void UpdateDataGrid1(List<inbox> list)
         {
             dataGridView1.DataSource  = list;
+            foreach (DataGridViewRow row in dataGridView1.Rows)
+            {
+                if (row.Cells[5].Value.ToString() == "Принято")
+                {
+                    row.DefaultCellStyle.BackColor = Color.AliceBlue;
+
+                }
+                if (row.Cells[5].Value.ToString() == "Прочитано")
+                {
+                    row.DefaultCellStyle.BackColor = Color.LightCyan ;
+                }
+            }
             dataGridView1.Update();
             dataGridView1.Refresh();
         }
+
         public void LookForInboxUpdates(){
             while(true){
                 form1.Inbox_update_mutex.WaitOne();
-
                 if (form1.Inbox_update_needed)
                 {
                     form1.Inbox_update_needed = false;
                     form1.Inbox_update_mutex.ReleaseMutex();
-
-                    
                     BeginInvoke(new SetTextDeleg(setlabel4state), new object[] { "обновляется" });
                     using (CourseDB db = new CourseDB())
                     {
-                        
                         BeginInvoke(new UpdateDataGridDeleg(UpdateDataGrid1), new object[] { db.inbox.ToList() });
                     }
-                    
-
                 }
                 else
                 {
                     form1.Inbox_update_mutex.ReleaseMutex();
                 }
-
                 
                 Thread.Sleep(1000);
                 BeginInvoke(new SetTextDeleg(setlabel4state), new object[] { "ожидание" });
@@ -131,9 +161,7 @@ namespace main_application
                 }
                 if (foreign_id_exists)
                 {
-                    if (form1.PhoneBook["3"] != null && form1.PhoneBook["1"] != null && form1.PhoneBook["2"] != null)
-                    {
-                        if (form1.AuthData["Port1"] != null && form1.AuthData["Port2"] != null && form1.AuthData["local"] != null)
+                    if (form1.AuthData["Port1"] != null && form1.AuthData["Port2"] != null && form1.AuthData["local"] != null)
                         {
                             if (status_string != "Прочитано")
                             {
@@ -145,15 +173,9 @@ namespace main_application
                                 var Receiver_Port = form1.AuthData.FirstOrDefault(x => x.Value == sender_string).Key;
                                 //either "Port1" or "Port2"
                                 string Port = Receiver_Port.ToString();
-                                var pc_address = form1.PhoneBook.FirstOrDefault(x => x.Value == Receiver_Port.ToString()).Key;
-                                var local_pc_address = form1.PhoneBook.FirstOrDefault(x => x.Value == "local").Key;
-                                //either "1" or "2" or "3"
-                                string pc_addr = pc_address.ToString();
-                               
-                                string local_pc_addr = local_pc_address.ToString();
-
+                                
                                 //Конвертирование из utf-8 в win1251 уже предусмотрено в функции
-                                byte[] frame = form1.CreateNewFrame(Form1.FrameType.OPENLETTER, local_pc_addr, len.ToString(), pc_addr, foreign_id_string, false);
+                                byte[] frame = form1.CreateNewFrame(Form1.FrameType.OPENLETTER, "0", len.ToString(), "0", foreign_id_string, false);
 
                                 Form1.One_Task openletterframe = new Form1.One_Task();
 
@@ -180,10 +202,9 @@ namespace main_application
 
                             }
                         }
-                    }
+                    
                 }
-
-
+                
             }
 
         }

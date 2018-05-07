@@ -34,6 +34,29 @@ namespace main_application
             {
                 dataGridView1.DataSource = db.outbox.ToList();
             }
+            dataGridView1.Columns[4].Visible = false;
+            dataGridView1.Columns[6].Visible = false;
+            dataGridView1.Columns[0].Width = 20;
+            dataGridView1.Columns[1].Width = 50;
+            dataGridView1.Columns[2].Width = 50;
+            dataGridView1.Columns[3].Width = 80;
+            dataGridView1.Columns[5].Width = 190;
+            dataGridView1.Columns[7].Width = 90;
+            foreach (DataGridViewRow row in dataGridView1.Rows)
+            {
+                if (row.Cells[5].Value.ToString() == "Принято")
+                {
+                    row.DefaultCellStyle.BackColor = Color.AliceBlue;
+
+                }
+                if (row.Cells[5].Value.ToString() == "Прочитано")
+                {
+                    row.DefaultCellStyle.BackColor = Color.Azure;
+                }
+            }
+            dataGridView1.Update();
+            dataGridView1.Refresh();
+
         }
 
 
@@ -47,6 +70,18 @@ namespace main_application
         public void UpdateDataGrid1(List<outbox> list)
         {
             dataGridView1.DataSource = list;
+            foreach (DataGridViewRow row in dataGridView1.Rows)
+            {
+                if (row.Cells[5].Value.ToString() == "Принято")
+                {
+                    row.DefaultCellStyle.BackColor = Color.AliceBlue;
+
+                }
+                if (row.Cells[5].Value.ToString() == "Прочитано")
+                {
+                    row.DefaultCellStyle.BackColor = Color.Azure;
+                }
+            }
             dataGridView1.Update();
             dataGridView1.Refresh();
         }

@@ -16,20 +16,12 @@ namespace main_application
 {
     public partial class Form1 : Form
     {
-        public static string AppDir = AppDomain.CurrentDomain.BaseDirectory;
-        public static string CrcLibDir = Path.Combine(AppDir, @"..\..\..\..", @"crclib_bytes.py");
+        public bool DEBUG_MODE = false;
+        public bool RET_ALLOWED = false;
+
         // Использется для передачти байтов по компорту
         public static Encoding WIN1251 = Encoding.GetEncoding("windows-1251");
         public static Encoding ASCII = Encoding.ASCII;
-        public string database_name = "coursedb.sqlite3";
-
-        // Начальные состояния соединений программы
-        public Dictionary<string, string> Channel_status = new Dictionary<string, string> {
-            { "ACK1", "undef" },
-            { "ACK2", "undef" },
-            { "ACK_local", "undef" }
-        };
-        public Mutex Channel_status_mutex = new Mutex();
 
         public Dictionary<string, string> Auth_status = new Dictionary<string, string> {
             { "ACK1", "undef" },
@@ -38,25 +30,34 @@ namespace main_application
         };
         public Mutex Auth_status_mutex = new Mutex();
 
+        // Перечисление состояний соединения
+        public enum Connection_Status
+        {
+            CONNECTION_WAIT,
+            CONNECTED,
+            DISCONNECTION_WAIT,
+            DISCONNECTED,
+        };
+
+        //Флаги наличия абонентов на линии
+        public Connection_Status Phys_status1 = Connection_Status.DISCONNECTED;
+        public Connection_Status Phys_status2 = Connection_Status.DISCONNECTED;
+        public Mutex Phys_status1_mutex = new Mutex();
+        public Mutex Phys_status2_mutex = new Mutex();
 
         // Здесь отмечаются только сообщения информационного кадра (пока так)
-        byte[] LastFrameSenttoPort1;
-        byte[] LastFrameSenttoPort2;
+        One_Task LastFrameSenttoPort1 = new One_Task(null, null);
+        One_Task LastFrameSenttoPort2 = new One_Task(null, null);
 
-        //Тесты visual studio 
-        public Int32 Ack1_awaited = 0;
-        public Int32 Ack2_awaited = 0;
-        public Mutex Ack1_mutex = new Mutex();
-        public Mutex Ack2_mutex = new Mutex();
+        public Mutex LastFrame_ToSend_mutex = new Mutex();
+
 
         public Int32 Ack1_awaited_Auth = 0;
         public Int32 Ack2_awaited_Auth = 0;
         public Mutex Ack1_mutex_Auth = new Mutex();
         public Mutex Ack2_mutex_Auth = new Mutex();
 
-        public bool SerialsToClose = false;
-        public Mutex SerialsToClose_mutex = new Mutex();
-
+        //Парамаетры компортов
         string SelectedPort1Name;
         Mutex SelectedPort1Name_mutex = new Mutex();
         string SelectedPort2Name;
@@ -67,18 +68,16 @@ namespace main_application
         //Мьютекс для согласования: чтения, записи, и изменения в списке ReceivedFrames
         public Mutex ReceivedFrames_mutex1 = new Mutex();
 
-        //Списки принятых данных для обмена между потоками Serial1_receiving1() и FindFrame1()
-        public List<byte> ReceivedFrames1 = new List<byte>();
-        public byte[] FrameToSend;
-
         //Мьютекс для согласования: чтения, записи, и изменения в списке ReceivedFrames2
         public Mutex ReceivedFrames_mutex2 = new Mutex();
+
+        //Списки принятых данных для обмена между потоками Serial1_receiving1() и FindFrame1()
+        public List<byte> ReceivedFrames1 = new List<byte>();
 
         //Списки принятых данных для обмена между потоками Serial1_receiving2() и FindFrame2()
         public List<byte> ReceivedFrames2 = new List<byte>();
 
-
-        // Структура для хранения задания
+        // Структура для хранения задания(кадра)
         public struct One_Task
         {
             public string PortNum;
@@ -88,6 +87,8 @@ namespace main_application
                 PortNum = name;
                 Frame = frame;
             }
+
+
         }
         // Список заданий используется четырмя потоками- По два на каждый порт
         // Формат записи заданий One_Task("Номер порта", Байты[] пришедшие в порт)
@@ -106,17 +107,6 @@ namespace main_application
         // Использется для первого и второго порта одновременно
         public Mutex TaskToSend_mutex = new Mutex();
 
-        // Содержит соответствие номеров машин и номер порта локальной
-        // машины на котором висит нумерованная машина
-        // "0" - адрес широковещания, Кадр с таким адресом принимает любая машина
-        public Dictionary<string, string> PhoneBook = new Dictionary<string, string> {
-            { "1", null },
-            { "2", null },
-            { "3", null }
-        };
-
-        public string Local_AuthName = null;
-        public string Local_Address = null;
         public Dictionary<string, string> AuthData = new Dictionary<string, string>
         {
             { "Port1", null },
@@ -125,59 +115,9 @@ namespace main_application
         };
         public Mutex AuthData_mutex = new Mutex();
 
-        //Номера портов соответствуют номерам реальных компортов системы(НЕ используется)
-        public Dictionary<string, string> PortAssoc = new Dictionary<string, string> {
-            { "Port1", null },
-            { "Port2", null },
-
-        };
-
-
-        // Заполняется при получении кадра Meeting
-        // Если всё заполнено, значит физ соединение установлено
-        // На данном этапе в порты приходят значения времени в кадрах Meeting
-        // Локальная машина на основании этих данных принимает решение, какой индекс назначить самой себе 
-        // И сопоставить адреса машин с портами, на которых они висят
-
-        public Dictionary<string, string> Computers_Timestamps = new Dictionary<string, string> {
-            { "local", null },
-            { "Port1", null },
-            { "Port2", null}
-        };
-
-
-        // Определение состояний
-        public enum Connection_Status
-        {
-            CONNECTION_WAIT,
-            CONNECTED,
-            DISCONNECTION_WAIT,
-            DISCONNECTED,
-        };
-
-
-        // portname ассоциируется с адресом машины, которая висит на этом порте (Dictionary<Portname, WsAddress>)
-        // Адреса машин задаются после открытия портов(при этом машина пытается получить timestamp с двух других машин)
-        // Когда все машины собрали timestamp'ы, каждая однозначно определяет свой адрес в сети и адрес двух других машин
-        // WsAddress ассоциируется с именем пользователя, который сидит за машиной в  течение текущего сеанса
-        // Meeting PAYLOAD
-        // ts = 1234554321;  + PortName
-
-        // Openletter  PAYLOAD
-        // message_id = 123; + PortName
-        class MessageToOpen_class
-        {
-            public string message_id { get; set; }
-        }
-        // InfoFrame PAYLOAD
-        //модели данных для почтовых сообщений
 
         #region Описание Модели Данных
-        class TimeStamp_class
-        {
-            public string timestamp { get; set; }
 
-        }
         class inbox_class
         {
             public string id { get; set; }
@@ -229,7 +169,7 @@ namespace main_application
         #endregion
 
         /**************************************************************
-                    ДЛЯ ВЗАИМОДЕЙСТВИЯ С ФОРМАМИ ПИСЕМ
+                   ФЛАГИ ДЛЯ ОБНОВЛЕНИЯ ПАПОК С ПИСЬМАМИ
         **************************************************************/
 
         public Mutex Inbox_update_mutex = new Mutex();
@@ -244,16 +184,16 @@ namespace main_application
         /***********************************************************
                 КОДИРОВАНИЕ СООБЩЕНИЙ И СБОРКА КАДРОВ                   
         ***********************************************************/
+
         class Codings
         {
-
-            public ushort SetDatalen(byte len1, byte len2)
+            public static ushort SetDatalen(byte len1, byte len2)
             {
                 return BitConverter.ToUInt16(new byte[] { len1, len2 }, 0);
             }
 
             // Таблица для определения синдрома ошибки
-            public Dictionary<byte, byte> synd_table = new Dictionary<byte, byte>
+            public static Dictionary<byte, byte> synd_table = new Dictionary<byte, byte>
             {
                 { 0x01, 0x01 },
                 { 0x02, 0x02 },
@@ -265,7 +205,7 @@ namespace main_application
             };
 
             //Получение битов контрольной суммы из исходных 4 бит //ОК
-            public byte GetChecksum(byte data)
+            public static byte GetChecksum(byte data)
             {
                 byte temp = data;
                 //Порождающий полином
@@ -297,14 +237,15 @@ namespace main_application
                 return checksum;
             }
             //OK
-            public byte EncodeDataBits(byte decoded_value)
+            public static byte EncodeDataBits(byte decoded_value)
             {
                 byte checksum = GetChecksum((byte)(decoded_value << 3));
                 byte encoded_value = (byte)((decoded_value << 3) + checksum);
                 return encoded_value;
             }
+
             //Принимает байт с контрольной суммой, возвращает полубайт
-            public byte DecodeDataBits(byte encoded_value)
+            public static byte DecodeDataBits(byte encoded_value)
             {
                 byte decoded_value;
                 byte checksum = GetChecksum(encoded_value);
@@ -314,19 +255,19 @@ namespace main_application
                 }
                 else
                 {
-
                     decoded_value = (byte)((synd_table[checksum] ^ encoded_value) >> 3);
                 }
                 return decoded_value;
             }
+
             //Принимает массив полубайтов win1251 -> выдает строку на русском языке в utf-8
-            public string ByteMessageToString(byte[] message_data)
+            public static string ByteMessageToString(byte[] message_data)
             {
                 int Message_Len = (message_data.Length);
                 byte[] bytestostring = new byte[Message_Len / 2];
                 for (int i = 0; i < Message_Len / 2; i++)
                 {
-                    // 
+                    // Проверка crc в принятых байтах.
                     if (GetChecksum((byte)(message_data[i * 2] & 0x0F)) != (byte)(message_data[i * 2] >> 3))
                     {
                         return null;
@@ -351,7 +292,7 @@ namespace main_application
                 return Received_String;
             }
             ////Принимает строку на русском языке в utf-8 -> Выдает массив полубайтов win1251
-            public byte[] StringToByteMessage(string StringToSend)
+            public static byte[] StringToByteMessage(string StringToSend)
             {
                 byte[] BytesToSend = new byte[(StringToSend.Length) * 2];
                 byte[] utf8bytes = Encoding.UTF8.GetBytes(StringToSend);
@@ -369,6 +310,7 @@ namespace main_application
             }
         };
 
+
         // Определение типов кадров
         public enum FrameType : byte
         {
@@ -382,6 +324,10 @@ namespace main_application
             RET = 0x09
         };
 
+        /******************************************************************
+                         СОЗДАНИЕ И РАЗБОР КАДРОВ ЛЮБОГО ТИПА
+        *******************************************************************/
+
         //сборка кадра для отправки в порт
         public byte[] CreateNewFrame(FrameType type, string senderstr, string datalenstr, string receiverstr, string payload, bool encoding = false)
         {
@@ -390,6 +336,7 @@ namespace main_application
             framebytes.Add((byte)type);
             byte sender;
             byte receiver;
+
             if (byte.TryParse(senderstr, out sender) && byte.TryParse(receiverstr, out receiver))
             {
                 framebytes.Add((byte)sender);
@@ -397,11 +344,11 @@ namespace main_application
 
             }
             else {
-                MessageBox.Show("FormNeFrame(): Не удалось преобразовать адрес машины в байт", "Error!");
+                MessageBox.Show("FormNewFrame(): Не удалось преобразовать адрес машины в байт", "Error!");
                 return null;
             }
 
-            //Если тип кадра содержит данные                                 
+            //Если тип кадра должен содержать данные                                 
             if (type == FrameType.INFORMATION || type == FrameType.LOGIN || type == FrameType.OPENLETTER || type == FrameType.MEETING)
             {
                 UInt16 datalen;
@@ -409,21 +356,21 @@ namespace main_application
                 {
                     byte highbyte = (BitConverter.GetBytes(datalen))[1];
                     byte lowbyte = (BitConverter.GetBytes(datalen))[0];
-
                     framebytes.Add((byte)highbyte);
                     framebytes.Add((byte)lowbyte);
 
-                    if (encoding == false)
+                    //Если требуется кодирование данных
+                    if (encoding == true)
                     {
-                        byte[] utf8bytes = Encoding.UTF8.GetBytes(payload);
-                        byte[] win1251Bytes = Encoding.Convert(Encoding.UTF8, WIN1251, utf8bytes);
-                        //string win1251string = WIN1251.GetString(win1251Bytes);
-                        //byte[] bytepayload = WIN1251.GetBytes(payload);
-                        framebytes.AddRange(win1251Bytes);
+                        byte[] double_encoded_payload = Codings.StringToByteMessage(payload);
+                        framebytes.AddRange(double_encoded_payload);
                     }
                     else
                     {
-                        //Кодирование payload кадра если encoding = true
+                        byte[] utf8bytes = Encoding.UTF8.GetBytes(payload);
+                        byte[] win1251Bytes = Encoding.Convert(Encoding.UTF8, WIN1251, utf8bytes);
+                        framebytes.AddRange(win1251Bytes);
+
                     }
                 }
                 else {
@@ -432,58 +379,104 @@ namespace main_application
                 }
 
             }
-
+            //Добавление  стопового байта и возврат сформированного кадра в виде byte[]
             framebytes.Add((byte)0xFE);
             return framebytes.ToArray();
         }
 
-
-        //разбор кадра, полученного из порта. Воврпщает структуру,заполненную принятыми данными
+        //разбор кадра, полученного из порта. Возвращает структуру,заполненную принятыми данными
         public DefaultFrame ParseReceivedFrame(byte[] frame, bool encoding = false)
         {
             DefaultFrame ParsedFrame = new DefaultFrame();
+            if (frame == null) { ParsedFrame.ResultOfParsing = "Fail"; return ParsedFrame; }
             if (frame.Length < 5)
             {
                 MessageBox.Show("ParseReceivedFrame(). Длина кадра меньше минимальной", "Error!");
+                ParsedFrame.ResultOfParsing = "Failed";
+                return ParsedFrame;
             }
             ParsedFrame.Startbyte = frame[0];
             ParsedFrame.Frametype = frame[1];
+
             ParsedFrame.OriginPort = ((UInt16)(frame[2])).ToString();
             ParsedFrame.DestinationPort = ((UInt16)(frame[3])).ToString();
             ParsedFrame.Stopbyte = frame[(frame.Length - 1)];
 
             byte type = ParsedFrame.Frametype;
+
+            ParsedFrame.ResultOfParsing = "OK";
             // Кадры данных типов могут быть носителями payload'а
             if (type == (byte)FrameType.INFORMATION || type == (byte)FrameType.LOGIN || type == (byte)FrameType.OPENLETTER || type == (byte)FrameType.MEETING)
             {
-                // Старший байт - 4, младший - 5.  В кадре передается в формате big-endian
-
-                ParsedFrame.datalen = BitConverter.ToUInt16(new byte[] { frame[5], frame[4] }, 0);
                 List<byte> data = new List<byte>();
+                // Старший байт - 4, младший - 5.  В кадре передается в формате big-endian
+                ParsedFrame.datalen = BitConverter.ToUInt16(new byte[] { frame[5], frame[4] }, 0);
 
-                // проверка на совпадение размера данных с указанным в кадре значением
-                if (frame.Length != (5 + 2 + ParsedFrame.datalen))
+                if (encoding == false)
                 {
-                    MessageBox.Show("ParseReceivedFrame() Длина поля данных в кадре не совпадает с указанной", "Error!");
+                    // проверка на совпадение размера данных с указанным в кадре значением
+                    // 2 флаговых байта, 2 - адресация, 2 - колчество символов  win 1251 , 1 - тип кадра
+                    if (frame.Length != (7 + ParsedFrame.datalen))
+                    {
+                        MessageBox.Show("ParseReceivedFrame(enc==false) Длина поля данных в кадре не совпадает с указанной", "Error!");
+                        //Установка флага "Пришел битый кадр" 
+                        ParsedFrame.ResultOfParsing = "Fail";
+                        return ParsedFrame;
+                    }
+                    else {
+
+                        for (int i = 6; i < frame.Length - 1; i++)
+                        {
+                            data.Add(frame[i]);
+                        }
+
+                    }
+
+                    ParsedFrame.MessageData = WIN1251.GetString(data.ToArray());
+                }
+                else if (encoding == true)
+                {
+                    List<byte> doubled_frame_data = new List<byte>();
+
+                    if (frame.Length != (7 + ParsedFrame.datalen * 2))
+                    {
+                        MessageBox.Show("ParseReceivedFrame(enc==true) Длина поля данных в кадре не совпадает с указанной ", "Error!");
+                        //Установка флага "Пришел битый кадр" 
+                        ParsedFrame.ResultOfParsing = "Fail";
+                        return ParsedFrame;
+                    }
+                    for (int i = 6; i < frame.Length - 1; i++)
+                    {
+                        doubled_frame_data.Add(frame[i]);
+                    }
+                    //Возвращенная строка в UTF-8
+                    string decoded_from_doubled = Codings.ByteMessageToString(doubled_frame_data.ToArray());
+                    if (decoded_from_doubled == null)
+                    {
+                        MessageBox.Show("ParseReceivedFrame(encoding==true) Ошибка в crc кадра", "Error!");
+                        //Установка флага "Пришел битый кадр" 
+                        ParsedFrame.ResultOfParsing = "Fail";
+                        return ParsedFrame;
+                    }
+                    else
+                    { ParsedFrame.MessageData = decoded_from_doubled; }
+
+                }
+
+            }
+            //Если кадр не должен содержать данные
+            else
+            {
+                if (frame.Length > 5)
+                {
                     ParsedFrame.ResultOfParsing = "Fail";
                     return ParsedFrame;
                 }
-                else {
 
-                    for (int i = 6; i < 6 + ParsedFrame.datalen; i++)
-                    {
-                        data.Add(frame[i]);
-                    }
-
-                }
-
-                ParsedFrame.MessageData = WIN1251.GetString(data.ToArray());
             }
-            ParsedFrame.ResultOfParsing = "OK";
-
             return ParsedFrame;
         }
-
+        //Структура для хранения результатов разбора любого кадра
         public struct DefaultFrame
         {
             public byte Startbyte;
@@ -540,6 +533,10 @@ namespace main_application
             //Port2
             toolStripComboBox2.SelectedItem = "COM6";
             SelectedPort2Name = "COM6";
+            this.button1.Enabled = true;
+            this.button4.Enabled = false;
+            this.AuthConnectButton.Enabled = true;
+            this.AuthDisconnectButton.Enabled = false;
 
             /*^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
                             ЗАДАНИЕ ПАРАМЕТРОВ КОМПОРТА    
@@ -548,30 +545,12 @@ namespace main_application
 
         private void Form1_Load(object sender, EventArgs e)
         {
-
         }
-
-        #region Обработчики события PinChanged и DataReceived(не используются)
-        private void serialPort1_PinChanged(object sender, SerialPinChangedEventArgs e)
-        { }
-        private void serialPort2_PinChanged(object sender, SerialPinChangedEventArgs e)
-        { }
-
-        //Обработка события не требуется
-        private void serialPort1_DataReceived(object sender, SerialDataReceivedEventArgs e)
-        { }
-
-        //Обработка события не требуется
-        private void serialPort2_DataReceived(object sender, SerialDataReceivedEventArgs e)
-        { }
-        #endregion
-
-
+        
         /****************************************************************
                ПОЛУЧЕНИЕ КАДРОВ ИЗ ПОРТОВ И ЗАПОЛНЕНИЕ СПИСКА ЗАДАНИЙ
          ****************************************************************/
         public enum ReceiveState { SOF_FOUND, EOF_FOUND, FREE }
-
         // Функции для считывания данных из ком порта в отдельном потоке
         public void Serial1_StartReceiving()
         {
@@ -580,7 +559,6 @@ namespace main_application
                 { MessageBox.Show("Порт Закрыт!", serialPort1.PortName); }
             }
             //Очистка буфера перед началом нового сеанса
-
             serialPort1.DiscardInBuffer();
             int bytestoread;
             while (serialPort1.IsOpen)
@@ -603,9 +581,7 @@ namespace main_application
                         //Выход из критической секции
                     }
                     catch (InvalidOperationException ex)
-                    {
-                        MessageBox.Show(ex.Message, "Error!");
-                    }
+                    {MessageBox.Show(ex.Message, "Error!"); }
                 }
                 Thread.Sleep(20);
             }
@@ -643,36 +619,41 @@ namespace main_application
                             ReceivedFrames1.RemoveRange(0, ReceivedFrames1.Count);
                         }
                         //Иначе вырезаем лишь часть и разбираем кадр(Передача контейнера кадра на разбор )
-                        else if (stopbyte != -1)
+                        else
+                        if (stopbyte != -1)
                         {
                             //Получение новых индексов для урезанного списка
                             startbyte = ReceivedFrames1.IndexOf(0xFF);
                             stopbyte = ReceivedFrames1.IndexOf(0xFE);
-                            //int secondstartbyte =ReceivedFrames.F ;
-                            Frame.AddRange(ReceivedFrames1.GetRange(0, stopbyte - startbyte + 1));
-                            ReceivedFrames1.RemoveRange(0, stopbyte - startbyte + 1);
-                            State = ReceiveState.EOF_FOUND;
-                            //Запуск разбора кадра Frame, после этого перевод в состояние FREE И очистка контейнера кадра
+                            if (stopbyte == -1)
+                            {
+                                Frame.AddRange(ReceivedFrames1.GetRange(0, ReceivedFrames1.Count));
+                                ReceivedFrames1.RemoveRange(0, ReceivedFrames1.Count);
+                            }
+                            else {
+                                Frame.AddRange(ReceivedFrames1.GetRange(0, stopbyte - startbyte + 1));
+                                ReceivedFrames1.RemoveRange(0, stopbyte - startbyte + 1);
+                                State = ReceiveState.EOF_FOUND;
+                                //Запуск разбора кадра Frame, после этого перевод в состояние FREE И очистка контейнера кадра
 
-                            //Запись найденного кадра в список заданий
-                            TaskReceived_mutex.WaitOne();
-                            TasksReceived.Add(new One_Task("Port1", Frame.ToArray()));
-                            TaskReceived_mutex.ReleaseMutex();
-                            Frame.Clear();
+                                //Запись найденного кадра в список заданий
+                                TaskReceived_mutex.WaitOne();
+                                TasksReceived.Add(new One_Task("Port1", Frame.ToArray()));
+                                TaskReceived_mutex.ReleaseMutex();
+                                Frame.Clear();
 
-                            State = ReceiveState.FREE;
+                                State = ReceiveState.FREE;
+                            }
                         }
                     }
                     //Если Начало кадра не найдено и при этом система готова к приему нового кадра,
                     // значит в порт пришел мусор, его удаляем из буфера кадров
                     else
-                    {
-                        ReceivedFrames1.Clear();
-                    }
+                    { ReceivedFrames1.Clear();}
 
                 }
-                //Если уже был обнаружен стартовый байт, значит принимае всё до конца буфера или до конечного байта 
-                //Заход в эту область происходит, если разиер кадра оказался больше, чем буфер приема
+                //Если уже был обнаружен стартовый байт, значит принимаем всё до конца буфера или до конечного байта 
+                //Заход в эту область происходит, если размер кадра оказался больше, чем буфер приема
                 else if (State == ReceiveState.SOF_FOUND)
                 {
                     stopbyte = ReceivedFrames1.IndexOf(0xFE);
@@ -682,9 +663,11 @@ namespace main_application
                         startbyte = ReceivedFrames1.IndexOf(0xFF);
                         if ((startbyte != -1) && State == ReceiveState.SOF_FOUND)
                         {
-                            MessageBox.Show("Функция FindFrame(), найден кадр без стопового байта", "Error!");
+                            MessageBox.Show("Функция FindFrame1(), найден кадр без стопового байта", "Error!");
                             ReceivedFrames_mutex1.ReleaseMutex();
-                            return;
+                            Frame.Clear();
+                            State = ReceiveState.FREE;
+                            continue;
                         }
                         Frame.AddRange(ReceivedFrames1.GetRange(0, ReceivedFrames1.Count));
                         ReceivedFrames1.RemoveRange(0, ReceivedFrames1.Count);
@@ -696,9 +679,11 @@ namespace main_application
                         startbyte = ReceivedFrames1.IndexOf(0xFF);
                         if ((startbyte != -1) && State == ReceiveState.SOF_FOUND)
                         {
-                            MessageBox.Show("Функция FindFrame(), найден кадр без стопового байта", "Error!");
+                            MessageBox.Show("Функция FindFrame1(), найден кадр без стопового байта", "Error!");
                             ReceivedFrames_mutex1.ReleaseMutex();
-                            return;
+                            Frame.Clear();
+                            State = ReceiveState.FREE;
+                            continue;
                         }
                         stopbyte = ReceivedFrames1.IndexOf(0xFE);
                         //Добавляем в контейнер кадра до стопового байта, остальное переносим в начало буфера
@@ -718,26 +703,21 @@ namespace main_application
                 // Переход в эту область не должен происходить
                 else if (State == ReceiveState.EOF_FOUND)
                 {
-                    MessageBox.Show(" Функция FindFrame.\r\n Состояние осталось EOF_FOUND в начале прохода цикла", "Error!");
-                    return;
+                    MessageBox.Show(" Функция FindFrame1.\r\n Состояние осталось EOF_FOUND в начале прохода цикла", "Error!");
+                    Frame.Clear();
+                    State = ReceiveState.FREE;
+                    continue;
                 }
-
-                //Выход из критической секции 
                 ReceivedFrames_mutex1.ReleaseMutex();
                 Thread.Sleep(10);
-
-
             }
         }
-
-        //(Здесь больше ничего писать не надо)
+        
         //Всё тоже самое, что и для первого порта(Serial1_StartReceiving).
         public void Serial2_StartReceiving()
         {
             if (!serialPort2.IsOpen)
-            {
-                MessageBox.Show("Порт Закрыт!", serialPort2.PortName);
-            }
+            { MessageBox.Show("Порт Закрыт!", serialPort2.PortName);}
             //Очистка буфера перед началом нового сеанса
             serialPort2.DiscardInBuffer();
             int bytestoread;
@@ -761,9 +741,7 @@ namespace main_application
                         //Выход из критической секции
                     }
                     catch (InvalidOperationException ex)
-                    {
-                        MessageBox.Show(ex.Message, "Error!");
-                    }
+                    { MessageBox.Show(ex.Message, "Error!"); }
                 }
                 Thread.Sleep(20);
             }
@@ -791,8 +769,10 @@ namespace main_application
                     if (startbyte != -1)
                     {
                         State = ReceiveState.SOF_FOUND;
+
                         //Удаляем всё, что было до начала кадра, т.е. теперь буфер кадров содержит только начало кадра и возможно конец
                         ReceivedFrames2.RemoveRange(0, startbyte);
+
                         //Далее, если конец кадра не обнаружен, то вырезаем всё, что накопилось в буфере кадров в локальный контейнер для кадра
                         if (stopbyte == -1)
                         {
@@ -800,33 +780,31 @@ namespace main_application
                             ReceivedFrames2.RemoveRange(0, ReceivedFrames2.Count);
                         }
                         //Иначе вырезаем лишь часть и разбираем кадр(Передача контейнера кадра на разбор )
-                        else if (stopbyte != -1)
+                        else
+                        if (stopbyte != -1)
                         {
                             //Получение новых индексов для урезанного списка
                             startbyte = ReceivedFrames2.IndexOf(0xFF);
                             stopbyte = ReceivedFrames2.IndexOf(0xFE);
-                            //int secondstartbyte =ReceivedFrames.F ;
-                            Frame.AddRange(ReceivedFrames2.GetRange(0, stopbyte - startbyte + 1));
-                            ReceivedFrames2.RemoveRange(0, stopbyte - startbyte + 1);
-                            State = ReceiveState.EOF_FOUND;
-                            //Запуск разбора кадра Frame, после этого перевод в состояние FREE И очистка контейнера кадра
-                            /*
-                            string fileName = "X:\\out.txt";
-                            FileStream aFile = new FileStream(fileName, FileMode.Append);
-                            StreamWriter sw = new StreamWriter(aFile);
-                            aFile.Seek(0, SeekOrigin.End);
-                            byte[] bytearray = Frame.ToArray();
-                            string Received_String = WIN1251.GetString(bytearray);
-                            sw.WriteLine(Received_String);
-                            sw.Close();
-                            */
-                            //Запись найденного кадра в список заданий
-                            TaskReceived_mutex.WaitOne();
-                            TasksReceived.Add(new One_Task("Port2", Frame.ToArray()));
-                            TaskReceived_mutex.ReleaseMutex();
-                            Frame.Clear();
+                            if (stopbyte == -1)
+                            {
+                                Frame.AddRange(ReceivedFrames2.GetRange(0, ReceivedFrames2.Count));
+                                ReceivedFrames2.RemoveRange(0, ReceivedFrames2.Count);
+                            }
+                            else {
+                                Frame.AddRange(ReceivedFrames2.GetRange(0, stopbyte - startbyte + 1));
+                                ReceivedFrames2.RemoveRange(0, stopbyte - startbyte + 1);
+                                State = ReceiveState.EOF_FOUND;
+                                //Запуск разбора кадра Frame, после этого перевод в состояние FREE И очистка контейнера кадра
 
-                            State = ReceiveState.FREE;
+                                //Запись найденного кадра в список заданий
+                                TaskReceived_mutex.WaitOne();
+                                TasksReceived.Add(new One_Task("Port2", Frame.ToArray()));
+                                TaskReceived_mutex.ReleaseMutex();
+                                Frame.Clear();
+
+                                State = ReceiveState.FREE;
+                            }
                         }
                     }
                     //Если Начало кадра не найдено и при этом система готова к приему нового кадра,
@@ -837,7 +815,7 @@ namespace main_application
                     }
 
                 }
-                //Если уже был обнаружен стартовый байт, значит принимае всё до конца буфера или до конечного байта 
+                //Если уже был обнаружен стартовый байт, значит принимаем всё до конца буфера или до конечного байта 
                 //Заход в эту область происходит, если разиер кадра оказался больше, чем буфер приема
                 else if (State == ReceiveState.SOF_FOUND)
                 {
@@ -848,9 +826,11 @@ namespace main_application
                         startbyte = ReceivedFrames2.IndexOf(0xFF);
                         if ((startbyte != -1) && State == ReceiveState.SOF_FOUND)
                         {
-                            MessageBox.Show("Функция FindFrame(), найден кадр без стопового байта", "Error!");
+                            MessageBox.Show("Функция FindFrame2(), найден кадр без стопового байта", "Error!");
                             ReceivedFrames_mutex2.ReleaseMutex();
-                            return;
+                            Frame.Clear();
+                            State = ReceiveState.FREE;
+                            continue;
                         }
                         Frame.AddRange(ReceivedFrames2.GetRange(0, ReceivedFrames2.Count));
                         ReceivedFrames2.RemoveRange(0, ReceivedFrames2.Count);
@@ -862,9 +842,11 @@ namespace main_application
                         startbyte = ReceivedFrames2.IndexOf(0xFF);
                         if ((startbyte != -1) && State == ReceiveState.SOF_FOUND)
                         {
-                            MessageBox.Show("Функция FindFrame(), найден кадр без стопового байта", "Error!");
+                            MessageBox.Show("Функция FindFrame2(), найден кадр без стопового байта", "Error!");
                             ReceivedFrames_mutex2.ReleaseMutex();
-                            return;
+                            Frame.Clear();
+                            State = ReceiveState.FREE;
+                            continue;
                         }
                         stopbyte = ReceivedFrames2.IndexOf(0xFE);
                         //Добавляем в контейнер кадра до стопового байта, остальное переносим в начало буфера
@@ -872,16 +854,7 @@ namespace main_application
                         ReceivedFrames2.RemoveRange(0, stopbyte + 1);
                         State = ReceiveState.EOF_FOUND;
                         //Запуск разбора кадра Frame, после этого перевод в состояние FREE И очистка контейнера кадра
-                        /*
-                        string fileName = "X:\\out.txt";
-                        FileStream aFile = new FileStream(fileName, FileMode.Append);
-                        StreamWriter sw = new StreamWriter(aFile);
-                        aFile.Seek(0, SeekOrigin.End);
-                        byte[] bytearray = Frame.ToArray();
-                        string Received_String = WIN1251.GetString(bytearray);
-                        sw.WriteLine(Received_String);
-                        sw.Close();
-                        */
+
                         //Запись найденного кадра в список заданий
                         TaskReceived_mutex.WaitOne();
                         TasksReceived.Add(new One_Task("Port2", Frame.ToArray()));
@@ -893,52 +866,47 @@ namespace main_application
                 // Переход в эту область не должен происходить
                 else if (State == ReceiveState.EOF_FOUND)
                 {
-                    MessageBox.Show(" Функция FindFrame.\r\n Состояние осталось EOF_FOUND в начале прохода цикла", "Error!");
-                    return;
+                    MessageBox.Show(" Функция FindFrame2.\r\n Состояние осталось EOF_FOUND в начале прохода цикла", "Error!");
+                    Frame.Clear();
+                    State = ReceiveState.FREE;
+                    continue;
                 }
-
                 //Выход из критической секции 
                 ReceivedFrames_mutex2.ReleaseMutex();
                 Thread.Sleep(10);
-
-
             }
         }
-
         /*^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
              Получение кадров из ком портов и внесение их в список заданий
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^*/
-
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^*/
 
         /***************************************************************************
                              ВЫПОЛНЕНИЕ ЗАДАНИЙ НА ПРИЕМ 
          ***************************************************************************/
 
         // Новые задания появляются в списке TasksReceived из функции FindFrame1 и FindFrame2
-
-        // Выводит адрес текущей машины
-        public void settextlabel2(string text)
-        {
-            label2.Text = text;
-        }
-        public void settextlabel4(string text)
-        {
-            label4.Text = text;
-        }
         public void TaskHandler()
         {
+            bool task_received = false;
             while (true)
             {
+                task_received = false;
+                One_Task task = new One_Task();
                 //Получение доступа к списку заданий
                 TaskReceived_mutex.WaitOne();
-                //Достаем Задание
                 if (TasksReceived.Count != 0)
                 {
-                    One_Task task = TasksReceived[0];
+                    task = TasksReceived[0];
                     //Удаление кадра и списка заданий
                     TasksReceived.RemoveAt(0);
                     TaskReceived_mutex.ReleaseMutex();
+                    task_received = true;
+                }
+                else
+                { TaskReceived_mutex.ReleaseMutex(); }
 
+                if (task_received == true)
+                {
                     byte[] frame = task.Frame;
                     // не Number,  а Name
                     //имена = {"Port1","Port2"} 
@@ -955,231 +923,65 @@ namespace main_application
                         if (frametype == (byte)FrameType.ACK || frametype == (byte)FrameType.RET)
                         {
                             if (frametype == (byte)FrameType.ACK)
-                            {
-                                string status_1;
-                                string status_2;
-                                string status_local;
-                                Channel_status_mutex.WaitOne();
-                                status_1 = Channel_status["ACK1"];
-                                status_2 = Channel_status["ACK2"];
-                                status_local = Channel_status["ACK_local"];
-                                Channel_status_mutex.ReleaseMutex();
-                                if (status_1 == "undef" || status_2 == "undef" || status_local == "undef")
-                                {
-                                    if (ReceivedFrameStruct.PortName == "Port1")
-                                    {
-                                        Ack1_mutex.WaitOne();
-                                        Ack1_awaited = 0;
-                                        Ack1_mutex.ReleaseMutex();
-                                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
-                                        { "Получен отчет о приеме Meeting из Port 1 \r\n" });
-                                        Channel_status_mutex.WaitOne();
-                                        Channel_status["ACK1"] = "Received";
-                                        Channel_status_mutex.ReleaseMutex();
-
-                                    }
-                                    if (ReceivedFrameStruct.PortName == "Port2")
-                                    {
-                                        Ack2_mutex.WaitOne();
-                                        Ack2_awaited = 0;
-                                        Ack2_mutex.ReleaseMutex();
-                                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
-                                        { "Получен отчет о приеме Meeting из Port 2 \r\n" });
-                                        Channel_status_mutex.WaitOne();
-                                        Channel_status["ACK2"] = "Received";
-                                        Channel_status_mutex.ReleaseMutex();
-                                    }
-                                }
-                                else {
-                                    string status_1_auth;
-                                    string status_2_auth;
-
-                                    Auth_status_mutex.WaitOne();
-                                    status_1_auth = Auth_status["ACK1"];
-                                    status_2_auth = Auth_status["ACK2"];
-                                    Auth_status_mutex.ReleaseMutex();
-
-                                    if (status_1_auth == "undef" || status_2_auth == "undef")
-                                    {
-                                        if (ReceivedFrameStruct.PortName == "Port1")
-                                        {
-                                            Ack1_mutex_Auth.WaitOne();
-                                            Ack1_awaited_Auth = 0;
-                                            Ack1_mutex_Auth.ReleaseMutex();
-                                            BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
-                                            { "Получен отчет о приеме Login из Port 1 \r\n" });
-                                            Auth_status_mutex.WaitOne();
-                                            Auth_status["ACK1"] = "Received";
-                                            Auth_status_mutex.ReleaseMutex();
-
-                                        }
-                                        if (ReceivedFrameStruct.PortName == "Port2")
-                                        {
-                                            Ack2_mutex_Auth.WaitOne();
-                                            Ack2_awaited_Auth = 0;
-                                            Ack2_mutex_Auth.ReleaseMutex();
-                                            BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
-                                            { "Получен отчет о приеме Login из Port 2 \r\n" });
-                                            Auth_status_mutex.WaitOne();
-                                            Auth_status["ACK2"] = "Received";
-                                            Auth_status_mutex.ReleaseMutex();
-                                        }
-                                    }
-                                    else
-                                    {
-
-                                    }
-                                }
-
-                                // Отметка отправленного сообщения как доставленного 
-                                // Далее, открыть возможность оправлять новые сообщения
-
-                            }
-                            //Если пришел кадр Ret, тогда повторная передача недавно переданного кадра с информацией
-                            else {
-
-                            }
+                                FrameReceivedAck(ReceivedFrameStruct);
+                            else
+                                FrameReceivedRet(ReceivedFrameStruct);
                         }
                         if (frametype == (byte)FrameType.MEETING || frametype == (byte)FrameType.DISCONNECT)
                         {
-                            if (frametype == (byte)FrameType.MEETING)
-                            {
-                                FrameReceivedMeeting(ReceivedFrameStruct);
+                            if (DEBUG_MODE) MessageBox.Show("Получен кадр типа meeting(не используется)", "Error!");
 
-                            }
-                            else {
-
-                            }
                         }
                         if (frametype == (byte)FrameType.LOGIN || frametype == (byte)FrameType.LOGOUT)
                         {
                             if (frametype == (byte)FrameType.LOGIN)
-                            {
                                 FrameReceivedLogin(ReceivedFrameStruct);
-
-                            }
-                            else {
-                                //Сообщение увеломляет об отключении пользователя, далее выводится сообщение об этом, и состема останавливает работу
-                                // Перевод системы в состояние логического, но не физического соединения
-                            }
+                            else
+                                FrameReceivedLogout(ReceivedFrameStruct);
                         }
-                        //ГОТОВО
                         if (frametype == (byte)FrameType.OPENLETTER || frametype == (byte)FrameType.INFORMATION)
                         {
                             if (frametype == (byte)FrameType.OPENLETTER)
-                            {
                                 FrameReceivedOpenLetter(ReceivedFrameStruct);
-                            }
-                            else {
+                            else
                                 FrameReceivedInformation(ReceivedFrameStruct);
-                            }
                         }
-
                     }
+                    //Если принятый кадр оказался битым, то отправка 
+                    //отправка RET кадра в PortName или машине OriginPort
                     else {
-
-                        TaskToSend_mutex.WaitOne();
-                        TasksToSend.Add(new One_Task(PortNumber, new byte[] { 0xFF, (byte)FrameType.RET, 0x00, 0x00, 0xFE }));
-                        ////Отправка RET кадра в PortName или машине OriginPort
-                        TaskToSend_mutex.ReleaseMutex();
-
+                        if (RET_ALLOWED)
+                        {
+                            TaskToSend_mutex.WaitOne();
+                            TasksToSend.Add(new One_Task(
+                                PortNumber, new byte[] { 0xFF, (byte)FrameType.RET, 0x00, 0x00, 0xFE }));
+                            TaskToSend_mutex.ReleaseMutex();
+                        }
                     }
-
-                }
-                else {
-                    TaskReceived_mutex.ReleaseMutex();
                 }
                 Thread.Sleep(20);
             }
         }
 
-        /*
-        TODO:
-         + Обработка получения Information кадра
-         + Обработка получения OpenLetter кадра
-         +/- Обработка получения ACK Кадра
-         + Обработка получения RET Кадра 
-         + Обработка получения MEETING Кадра
-         - Обработка получения DISCONNECT Кадра
-         ? Обработка получения LOGIN Кадра
-         - Обработка получения LOGOUT Кадра
-        */
-
         /*******************************************************
                        ОБРАБОТЧИКИ СОБЫТИЙ
         ********************************************************/
-        //Готово
-        public void FrameReceivedMeeting(DefaultFrame ReceivedFrame)
-        {
-            TaskToSend_mutex.WaitOne();
-            TasksToSend.Add(new One_Task(ReceivedFrame.PortName, new byte[] { 0xFF, (byte)FrameType.ACK, 0x00, 0x00, 0xFE }));
-            ////Отправка ACK кадра в PortName или машине OriginPort
-            TaskToSend_mutex.ReleaseMutex();
-
-            if (ReceivedFrame.PortName == "Port1")
-            {
-                Computers_Timestamps["Port1"] = ReceivedFrame.MessageData;
-
-            }
-
-            if (ReceivedFrame.PortName == "Port2")
-            {
-                Computers_Timestamps["Port2"] = ReceivedFrame.MessageData;
-
-
-            }
-
-            //Если все timestamp'ы были получены , тогда сравниваем их , затем вычисляем  адреса машин
-            if (Computers_Timestamps["local"] != null && Computers_Timestamps["Port1"] != null && Computers_Timestamps["Port2"] != null)
-            {
-
-                Channel_status_mutex.WaitOne();
-                Channel_status["ACK_local"] = "Received";
-                Channel_status_mutex.ReleaseMutex();
-
-                long localTime;
-                long Port1Time;
-                long Port2Time;
-                List<long> order = new List<long>();
-
-                bool res1 = long.TryParse(Computers_Timestamps["local"], out localTime);
-                bool res2 = long.TryParse(Computers_Timestamps["Port1"], out Port1Time);
-                bool res3 = long.TryParse(Computers_Timestamps["Port2"], out Port2Time);
-                if (!res1 || !res2 || !res3)
-                {
-                    MessageBox.Show("FrameReceivedMeeting, ошибка при получении числа из Computers_timestamp", "Error!");
-                }
-
-                order.Add(localTime);
-                order.Add(Port1Time);
-                order.Add(Port2Time);
-                order.Sort();
-                PhoneBook[(order.IndexOf(localTime) + 1).ToString()] = "local";
-                PhoneBook[(order.IndexOf(Port1Time) + 1).ToString()] = "Port1";
-                PhoneBook[(order.IndexOf(Port2Time) + 1).ToString()] = "Port2";
-                Local_Address = (order.IndexOf(localTime) + 1).ToString();
-
-                BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { " Адреса абонентов получены\r\n" });
-                BeginInvoke(new SetTextDeleg(settextlabel2), new object[] { Local_Address });
-
-            }
-
-        }
 
         public void FrameReceivedLogin(DefaultFrame ReceivedFrame)
         {
+            ////Отправка ACK кадра в PortName
             TaskToSend_mutex.WaitOne();
-            TasksToSend.Add(new One_Task(ReceivedFrame.PortName, new byte[] { 0xFF, (byte)FrameType.ACK, 0x00, 0x00, 0xFE }));
-            ////Отправка ACK кадра в PortName или машине OriginPort
-            TaskToSend_mutex.ReleaseMutex();
+            TasksToSend.Add(
+                new One_Task(
+                    ReceivedFrame.PortName, CreateNewFrame(FrameType.ACK, "0", null, "0", null, false)
+                    ));
 
+            TaskToSend_mutex.ReleaseMutex();
             if (ReceivedFrame.PortName == "Port1")
             {
                 AuthData_mutex.WaitOne();
                 AuthData["Port1"] = ReceivedFrame.MessageData;
                 AuthData_mutex.ReleaseMutex();
-
-
             }
 
             if (ReceivedFrame.PortName == "Port2")
@@ -1187,7 +989,6 @@ namespace main_application
                 AuthData_mutex.WaitOne();
                 AuthData["Port2"] = ReceivedFrame.MessageData;
                 AuthData_mutex.ReleaseMutex();
-
 
             }
 
@@ -1208,68 +1009,134 @@ namespace main_application
             }
 
         }
-
         //Готово
+        public void FrameReceivedAck(DefaultFrame ReceivedFrameStruct)
+        {
+            string status_1_auth;
+            string status_2_auth;
+            //Получение состояния авторизации
+            Auth_status_mutex.WaitOne();
+            status_1_auth = Auth_status["ACK1"];
+            status_2_auth = Auth_status["ACK2"];
+            Auth_status_mutex.ReleaseMutex();
+            if (status_1_auth == "undef" || status_2_auth == "undef")
+            {
+                if (ReceivedFrameStruct.PortName == "Port1")
+                {
+                    Ack1_mutex_Auth.WaitOne();
+                    Ack1_awaited_Auth = 0;
+                    Ack1_mutex_Auth.ReleaseMutex();
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
+                    { "Получен отчет о приеме Login из Port 1 \r\n" });
+
+                    Auth_status_mutex.WaitOne();
+                    Auth_status["ACK1"] = "Received";
+                    Auth_status_mutex.ReleaseMutex();
+
+                }
+                if (ReceivedFrameStruct.PortName == "Port2")
+                {
+                    Ack2_mutex_Auth.WaitOne();
+                    Ack2_awaited_Auth = 0;
+                    Ack2_mutex_Auth.ReleaseMutex();
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
+                    { "Получен отчет о приеме Login из Port 2 \r\n" });
+                    Auth_status_mutex.WaitOne();
+                    Auth_status["ACK2"] = "Received";
+                    Auth_status_mutex.ReleaseMutex();
+                }
+            }
+            bool auth_stat = false;
+            Auth_status_mutex.WaitOne();
+
+            if (Auth_status["ACK1"] != "undef" && Auth_status["ACK_local"] != "undef" && Auth_status["ACK2"] != "undef")
+            {
+                auth_stat = true;
+            }
+
+            Auth_status_mutex.ReleaseMutex();
+            //Если авторизован, тогда приходящие ACK подтверждают прием сообщения infoframe
+            if (auth_stat)
+            {
+                if (ReceivedFrameStruct.PortName == "Port1")
+                {
+                    LastFrame_ToSend_mutex.WaitOne();
+
+                    LastFrameSenttoPort1.PortNum = null;
+                    LastFrame_ToSend_mutex.ReleaseMutex();
+                }
+                if (ReceivedFrameStruct.PortName == "Port2")
+                {
+                    LastFrame_ToSend_mutex.WaitOne();
+
+                    LastFrameSenttoPort2.PortNum = null;
+                    LastFrame_ToSend_mutex.ReleaseMutex();
+                }
+
+
+            }
+
+
+            // Отметка отправленного сообщения как доставленного 
+            // Далее, открыть возможность оправлять новые сообщения
+
+        }
+
         public void FrameReceivedRet(DefaultFrame frame)
         {
             // Здесь получаем значение last send frame о отправляем его вкомпорт
+            LastFrame_ToSend_mutex.WaitOne();
+            One_Task LastFrameSent_local1 = LastFrameSenttoPort1;
+            One_Task LastFrameSent_local2 = LastFrameSenttoPort2;
+
+            LastFrame_ToSend_mutex.ReleaseMutex();
+
             TaskToSend_mutex.WaitOne();
+
             if (frame.PortName == "Port1")
             {
-                TasksToSend.Add(new One_Task("Port1", LastFrameSenttoPort1));
+                if (LastFrameSent_local1.PortNum != null && LastFrameSent_local1.Frame != null)
+                    TasksToSend.Add(LastFrameSent_local1);
             }
             if (frame.PortName == "Port2")
             {
-                TasksToSend.Add(new One_Task("Port1", LastFrameSenttoPort1));
-            }
+                if (LastFrameSent_local1.PortNum != null && LastFrameSent_local1.Frame != null)
 
+                    TasksToSend.Add(LastFrameSent_local2);
+            }
             TaskToSend_mutex.ReleaseMutex();
 
+
         }
 
-        // Не используется
-        public void FrameReceivedDisconnect(string PortName, byte[] frame)
+        public void FrameReceivedLogout(DefaultFrame frame)
         {
+            AuthData_mutex.WaitOne();
+            AuthData["Port1"] = null;
+            AuthData["Port2"] = null;
+            AuthData["local"] = null;
 
+            AuthData_mutex.ReleaseMutex();
+            Auth_status_mutex.WaitOne();
+            Auth_status["ACK_local"] = "undef";
+            Auth_status["ACK1"] = "undef";
+            Auth_status["ACK2"] = "undef";
+            Auth_status_mutex.ReleaseMutex();
 
-            //Если пришел Disconnect Кадр, то
-            // меняем состояние системы на physical Disconnect
-            // И очищаем словари соответствия портов, номеров машин и прочего
-            PhoneBook["0"] = null;
-            PhoneBook["1"] = null;
-            PhoneBook["2"] = null;
+            BeginInvoke(new Set_ButtonState(Set_AuthConnectButton), new object[] { true });
+            BeginInvoke(new Set_ButtonState(Set_AuthDisconnectButton), new object[] { false });
 
-            PortAssoc["Port1"] = null;
-            PortAssoc["Port2"] = null;
-
-            Computers_Timestamps["Port1"] = null;
-            Computers_Timestamps["Port2"] = null;
-            Computers_Timestamps["local"] = null;
-
-
-            if (serialPort1.IsOpen)
-            { serialPort1.Close(); }
-            if (serialPort2.IsOpen)
-            { serialPort2.Close(); }
-
+            BeginInvoke(new SetTextDeleg(addtotextbox1),
+                new object[] { "Получен кадр о деавторизации, логины сброшены" });
 
         }
-        public void FrameReceivedLogout(string PortNmae, byte[] frame)
-        {
-
-            //Здесь очистка таблицы логинов (соответствие номера машины и имени пользователя)
-
-            // Здесь нужно запустить выход из состояния авторизованности
-        }
-
         // Обработчик открытия письма (готов)
         // В БД ищется письмо, затем отмечается как прочитанное
         public void FrameReceivedOpenLetter(DefaultFrame frame)
         {
             //Подключение к бд, поиск письма с тем id, который указан в принятом пакете
-
+            //После этого обновление таблицы принятых сообщений на ui (установкой Outbox_update_needed= true)   
             long LetterId = long.Parse(frame.MessageData);
-
             using (CourseDB db = new CourseDB())
             {
                 var result = db.outbox.SingleOrDefault(x => x.id == LetterId);
@@ -1277,7 +1144,6 @@ namespace main_application
                 {
                     if (result.status == "Прочитано")
                     {
-
                         BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { $" Сообщение : письмо с id = {LetterId} уже было прочитано\r\n" });
                     }
                     else {
@@ -1291,29 +1157,18 @@ namespace main_application
                     }
                 }
             }
-
-
-            //После этого обновление таблицы принятых сообщений на ui                       
-
         }
-
-        //Готов
-        public UInt16 GetDatalen(byte len1, byte len2)
-        {
-            return BitConverter.ToUInt16(new byte[] { len1, len2 }, 0);
-        }
-
         //Готов
         public void FrameReceivedInformation(DefaultFrame local_frame)
         {
             byte[] framedata = WIN1251.GetBytes(local_frame.MessageData);
             string framestr = WIN1251.GetString(framedata);
             inbox_class message_data = JsonConvert.DeserializeObject<inbox_class>(local_frame.MessageData);
-            if (true)
+            if (local_frame.ResultOfParsing == "OK")
             {
                 BeginInvoke
-                    (new SetTextDeleg(addtotextbox1),
-                    new object[] { $"Получено письмо от {message_data.sender}" + "\r\n" });
+                     (new SetTextDeleg(addtotextbox1),
+                     new object[] { $"Получено письмо от {message_data.sender}" + "\r\n" });
 
                 long foreign_id = long.Parse(message_data.id);
                 inbox received_letter = new inbox();
@@ -1325,10 +1180,23 @@ namespace main_application
                 received_letter.status = "Принято";
                 using (CourseDB db = new CourseDB())
                 {
-                    db.inbox.Add(received_letter);
-                    db.SaveChanges();
+                    bool letter_already_exists = false;
+                    try
+                    {
+                        inbox letter = db.inbox.FirstOrDefault(x => x.foreign_id == received_letter.foreign_id);
+                        if (letter.foreign_id == received_letter.foreign_id)
+                        { letter_already_exists = true; }
+                    }
+                    catch
+                    { letter_already_exists = false; }
+                    if (!letter_already_exists)
+                    {
+                        db.inbox.Add(received_letter);
+                        db.SaveChanges();
+                    }
                     db.Dispose();
                 }
+
                 Inbox_update_mutex.WaitOne();
                 Inbox_update_needed = true;
                 Inbox_update_mutex.ReleaseMutex();
@@ -1341,99 +1209,248 @@ namespace main_application
             }
             else
             {
-                // Если сообщение кривое, то отправляем RET в порт из которого он был принят
-                TaskToSend_mutex.WaitOne();
-                TasksToSend.Add(new One_Task(local_frame.PortName,
-                    CreateNewFrame(FrameType.RET, "0", null, "0", null, false)
-                    ));
-                TaskToSend_mutex.ReleaseMutex();
+                if (RET_ALLOWED)
+                {
+                    // Если сообщение кривое, то отправляем RET в порт из которого он был принят
+                    TaskToSend_mutex.WaitOne();
+                    TasksToSend.Add(new One_Task(local_frame.PortName,
+                        CreateNewFrame(FrameType.RET, "0", null, "0", null, false)
+                        ));
+                    TaskToSend_mutex.ReleaseMutex();
+                }
             }
-            //Декодирование содержимого посылки. Если всё ок, отправляем ACK отправителю,
-            //письмо помещается в БД( таблицу Inbox) со статусом доставлено
-            //Если Содержит ошибку, отправляем RET отправителю
-
         }
 
         /* 
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
          функции для исполнения заданий, полученных из списка с заданиями
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        */
-
-        //Обработка ACK кадра необходима для подтверждения приема 
-        // Посылка MEETING или LOGIN или INFORMATION кадра адресату,
-        // Этот кадр отмечается, как переданный, но пока не распознанный
-        // затем ожидание ответа - ACK или RET.
-        // Если ACK тогда отмеченный кадр помечается как доставленный(если это письмо)
-        // Если это Login или Meeting кадр, тогда система переводится в состояние "логически соединен" или "физически соединен"
-
-        /*
+        
         **********************************************************
                           ОТПРАВКА НОВОГО ПИСЬМА 
-        **********************************************************   
+        **********************************************************
         */
-        private volatile Type _dependency;
 
+        //Источник особой уличной магии
+        private volatile Type _dependency;
         public void MyClass()
+        { _dependency = typeof(System.Data.Entity.SqlServer.SqlProviderServices); }
+
+        public void Wait_for_info_ack1()
         {
-            _dependency = typeof(System.Data.Entity.SqlServer.SqlProviderServices);
+            int counter = 0;
+            while (true)
+            {
+                One_Task frame_acked1;
+                LastFrame_ToSend_mutex.WaitOne();
+                frame_acked1 = LastFrameSenttoPort1;
+                LastFrame_ToSend_mutex.ReleaseMutex();
+
+                bool frame_is_to_resend = true;
+                if (frame_acked1.PortNum == null)
+                { frame_is_to_resend = false; }
+
+                if (!frame_is_to_resend)
+                {
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
+                                            { "Сообщение доставлено"});
+
+                    using (CourseDB db = new CourseDB())
+                    {
+                        DefaultFrame a = ParseReceivedFrame(LastFrameSenttoPort1.Frame);
+                        if (a.ResultOfParsing != "OK") { return; }
+                        string id_string = JsonConvert.DeserializeObject<outbox_class>(a.MessageData).id;
+                        long id_val = long.Parse(id_string);
+                        var last_letter = db.outbox.FirstOrDefault<outbox>(x => x.id == id_val);
+                        last_letter.status = "Доставлено";
+                        db.SaveChanges();
+                    }
+                    Outbox_update_mutex.WaitOne();
+                    Outbox_update_needed = true;
+                    Outbox_update_mutex.ReleaseMutex();
+                    return;
+                }
+                if (frame_is_to_resend)
+                {
+                    TaskToSend_mutex.WaitOne();
+                    TasksToSend.Add(frame_acked1);
+                    TaskToSend_mutex.ReleaseMutex();
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
+                          {$"сообщение(попытка:{counter}, порт:{frame_acked1.PortNum}"});
+                    counter++;
+                }
+
+                if (counter > 10 && frame_is_to_resend)
+                {
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
+                                    { "Сообщение  не было доставлено"});
+                    using (CourseDB db = new CourseDB())
+                    {
+                        DefaultFrame a = ParseReceivedFrame(LastFrameSenttoPort1.Frame);
+                        string id_string = JsonConvert.DeserializeObject<outbox_class>(a.MessageData).id;
+                        long id_val = long.Parse(id_string);
+                        var last_letter = db.outbox.FirstOrDefault<outbox>(x => x.id == id_val);
+                        last_letter.status = "Не Доставлено";
+                        db.SaveChanges();
+                    }
+                    Outbox_update_mutex.WaitOne();
+                    Outbox_update_needed = true;
+                    Outbox_update_mutex.ReleaseMutex();
+                    return;
+                }
+                Thread.Sleep(4000);
+            }
         }
+
+        public void Wait_for_info_ack2()
+        {
+            int counter = 0;
+            while (true)
+            {
+                One_Task frame_acked2;
+                LastFrame_ToSend_mutex.WaitOne();
+                frame_acked2 = LastFrameSenttoPort2;
+                LastFrame_ToSend_mutex.ReleaseMutex();
+
+                bool frame_is_to_resend = true;
+
+                if (frame_acked2.PortNum == null)
+                { frame_is_to_resend = false; }
+
+                if (!frame_is_to_resend)
+                {
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
+                                            { "Сообщение доставлено"});
+
+                    using (CourseDB db = new CourseDB())
+                    {
+                        DefaultFrame a = ParseReceivedFrame(LastFrameSenttoPort2.Frame);
+                        string id_string = JsonConvert.DeserializeObject<outbox_class>(a.MessageData).id;
+                        long id_val = long.Parse(id_string);
+                        var last_letter = db.outbox.FirstOrDefault<outbox>(x => x.id == id_val);
+                        last_letter.status = "Доставлено";
+                        db.SaveChanges();
+                    }
+                    Outbox_update_mutex.WaitOne();
+                    Outbox_update_needed = true;
+                    Outbox_update_mutex.ReleaseMutex();
+                    return;
+                }
+                if (frame_is_to_resend)
+                {
+                    TaskToSend_mutex.WaitOne();
+                    TasksToSend.Add(frame_acked2);
+                    TaskToSend_mutex.ReleaseMutex();
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
+                                           {$"сообщение(попытка:{counter}, порт:{frame_acked2.PortNum}"});
+                    counter++;
+                }
+
+                if (counter > 10 && frame_is_to_resend)
+                {
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
+                                            { "Сообщение  не было доставлено"});
+                    using (CourseDB db = new CourseDB())
+
+                    {
+                        DefaultFrame a = ParseReceivedFrame(LastFrameSenttoPort2.Frame);
+                        string id_string = JsonConvert.DeserializeObject<outbox_class>(a.MessageData).id;
+                        long id_val = long.Parse(id_string);
+                        var last_letter = db.outbox.FirstOrDefault<outbox>(x => x.id == id_val);
+                        last_letter.status = "Не Доставлено";
+                        db.SaveChanges();
+                    }
+                    Outbox_update_mutex.WaitOne();
+                    Outbox_update_needed = true;
+                    Outbox_update_mutex.ReleaseMutex();
+                    return;
+                }
+                Thread.Sleep(4000);
+            }
+        }
+
         public void SendNewLetterButton_Click(object sender, EventArgs e)
         {
             string Re_string = ReTextbox.Text;
             string Receiver_name = ReceiverComboBox.SelectedItem.ToString();
             string Letter_Message = LetterTextBox.Text;
 
-            if (PhoneBook["1"] != null && PhoneBook["2"] != null && PhoneBook["3"] != null)
-            {
-                if (AuthData["Port1"] != null && AuthData["Port2"] != null && AuthData["local"] != null)
-                {
-                    using (CourseDB db = new CourseDB())
-                    {
-                        outbox letter = new outbox();
-                        letter.re = Re_string;
-                        letter.sender = AuthData["local"];
-                        letter.recepient = Receiver_name;
-                        letter.status = "Отправлено";
-                        letter.msg = Letter_Message;
-                        db.outbox.Add(letter);
-                        db.SaveChanges();
-                    }
-                    long max;
-                    outbox a;
-                    using (CourseDB db = new CourseDB())
-                    {
-                        max = db.outbox.Max(x => x.id);
-                        a = db.outbox.FirstOrDefault(x => x.id == max);
-                    }
-                    string letter_local_id = a.id.ToString();
-                    string sender_addr = PhoneBook.FirstOrDefault(x => x.Value == "local").Key;
+            Phys_status1_mutex.WaitOne();
+            Connection_Status p1 = Phys_status1;
+            Phys_status1_mutex.ReleaseMutex();
 
-                    string receiver_port = AuthData.FirstOrDefault(x => x.Value == Receiver_name).Key;
-                    string receiver_addr = PhoneBook.FirstOrDefault(x => x.Value == receiver_port).Key;
-                    outbox_class letter_payload_obj = new outbox_class(a);
-                    string letter_payload_string = JsonConvert.SerializeObject(letter_payload_obj);
-                    string letter_len = letter_payload_string.Length.ToString();
-                    byte[] Letter_frame_to_send = CreateNewFrame(FrameType.INFORMATION, sender_addr,
-                        letter_len, receiver_addr, letter_payload_string, false);
-                    TaskToSend_mutex.WaitOne();
-                    TasksToSend.Add(new One_Task(receiver_port, Letter_frame_to_send));
-                    TaskToSend_mutex.ReleaseMutex();
+            Phys_status2_mutex.WaitOne();
+            Connection_Status p2 = Phys_status2;
+            Phys_status2_mutex.ReleaseMutex();
 
-                    Outbox_update_mutex.WaitOne();
-                    Outbox_update_needed = true;
-                    Outbox_update_mutex.ReleaseMutex();
-                }
-                else
-                {
-                    MessageBox.Show("SendNewLetterButton_Click(): login'ы не определены", "Error!");
-                }
-            }
-            else
+            if (p1 != Connection_Status.CONNECTED || p2 != Connection_Status.CONNECTED)
             {
-                MessageBox.Show("SendNewLetterButton_Click(): Локальная машина не подключена к сети", "Error!");
+                BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "физическое соединение не установлено\r\n" });
+                return;
             }
 
+            if (AuthData["Port1"] != null && AuthData["Port2"] != null && AuthData["local"] == null)
+            {
+                BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "Логины не определены\r\n" });
+                if (DEBUG_MODE)
+                {
+                    MessageBox.Show("SendNewLetterButton_Click(): логическое соединение не установлено", "Error!");
+                }
+                return;
+            }
+            using (CourseDB db = new CourseDB())
+            {
+                outbox letter = new outbox();
+                letter.re = Re_string;
+                letter.sender = AuthData["local"];
+                letter.recepient = Receiver_name;
+                letter.status = "Отправлено";
+                letter.msg = Letter_Message;
+                db.outbox.Add(letter);
+                db.SaveChanges();
+            }
+            long max;
+            outbox a;
+            using (CourseDB db = new CourseDB())
+            {
+                max = db.outbox.Max(x => x.id);
+                a = db.outbox.FirstOrDefault(x => x.id == max);
+            }
+            string letter_local_id = a.id.ToString();
+            string receiver_port = AuthData.FirstOrDefault(x => x.Value == Receiver_name).Key;
+            outbox_class letter_payload_obj = new outbox_class(a);
+            string letter_payload_string = JsonConvert.SerializeObject(letter_payload_obj);
+            string letter_len = letter_payload_string.Length.ToString();
+            byte[] Letter_frame_to_send = CreateNewFrame(
+                FrameType.INFORMATION, "0", letter_len, "0", letter_payload_string, false);
+
+            if (receiver_port == "Port1")
+            {
+                LastFrame_ToSend_mutex.WaitOne();
+                LastFrameSenttoPort1 = new One_Task(receiver_port, Letter_frame_to_send);
+                LastFrame_ToSend_mutex.ReleaseMutex();
+                Thread Wait_for_info_ack1thr = new Thread(Wait_for_info_ack1);
+                Wait_for_info_ack1thr.IsBackground = true;
+                Wait_for_info_ack1thr.Start();
+            }
+
+            if (receiver_port == "Port2")
+            {
+                LastFrame_ToSend_mutex.WaitOne();
+                LastFrameSenttoPort2 = new One_Task(receiver_port, Letter_frame_to_send);
+                LastFrame_ToSend_mutex.ReleaseMutex();
+                Thread Wait_for_info_ack2thr = new Thread(Wait_for_info_ack2);
+                Wait_for_info_ack2thr.IsBackground = true;
+                Wait_for_info_ack2thr.Start();
+            }
+
+            TaskToSend_mutex.WaitOne();
+            TasksToSend.Add(new One_Task(receiver_port, Letter_frame_to_send));
+            TaskToSend_mutex.ReleaseMutex();
+
+            Outbox_update_mutex.WaitOne();
+            Outbox_update_needed = true;
+            Outbox_update_mutex.ReleaseMutex();
 
         }
         private void textBox1_TextChanged(object sender, EventArgs e)
@@ -1443,56 +1460,45 @@ namespace main_application
         // Делегат используется для записи в UI control из потока не-UI
         private delegate void SetTextDeleg(string text);
         private delegate void FillComboBoxDeleg();
+
+        //Заполняет список авторизованных пользователей
         public void FillReceiverComboBox()
         {
+            ReceiverComboBox.Items.Clear();
             AuthData_mutex.WaitOne();
-            string[] values = AuthData.Values.ToArray();
+            string[] values = new string[] { AuthData["Port1"], AuthData["Port2"] };
             ReceiverComboBox.Items.AddRange(values);
             AuthData_mutex.ReleaseMutex();
         }
+
         public void settextbox1(string text)
-        {
-            textBox1.Text = text;
-        }
+        { textBox1.Text = text; }
 
         public void addtotextbox1(string text)
         {
-            textBox1.Text = textBox1.Text + text;
+            textBox1.AppendText(text);
         }
 
-
-        #region Открытие портов
         public void OpenSerial1()
         {
+            //Установка параметров компорта1
             SelectedPort1Name_mutex.WaitOne();
-
             try
-            {
-                serialPort1.PortName = SelectedPort1Name;
-            }
+            { serialPort1.PortName = SelectedPort1Name; }
             catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, serialPort1.PortName);
-
-            }
-
-
+            { MessageBox.Show(ex.Message, serialPort1.PortName); }
             SelectedPort1Name_mutex.ReleaseMutex();
-            //serialPort2.PortName = "COM3";
 
             SelectedBaudrate_mutex.WaitOne();
             serialPort1.BaudRate = int.Parse(SelectedBaudrate);
             SelectedBaudrate_mutex.ReleaseMutex();
-
             try
             {
-
-
                 serialPort1.Open();
-
                 serialPort1.DiscardOutBuffer();
                 serialPort1.DiscardInBuffer();
                 serialPort1.DtrEnable = true;
+                BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "Порт1 был открыт\r\n" });
                 return;
             }
             catch (Exception ex)
@@ -1500,21 +1506,16 @@ namespace main_application
                 MessageBox.Show(ex.Message, serialPort1.PortName);
                 return;
             }
-
         }
 
         public void OpenSerial2()
         {
+            //Установка параметров компорта2
             SelectedPort2Name_mutex.WaitOne();
             try
-            {
-                serialPort2.PortName = SelectedPort2Name;
-            }
+            { serialPort2.PortName = SelectedPort2Name; }
             catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, serialPort1.PortName);
-
-            };
+            { MessageBox.Show(ex.Message, serialPort1.PortName); };
             SelectedPort2Name_mutex.ReleaseMutex();
             // serialPort2.PortName = "COM6";
             SelectedBaudrate_mutex.WaitOne();
@@ -1522,12 +1523,11 @@ namespace main_application
             SelectedBaudrate_mutex.ReleaseMutex();
             try
             {
-
                 serialPort2.Open();
-
                 serialPort2.DiscardOutBuffer();
                 serialPort2.DiscardInBuffer();
                 serialPort2.DtrEnable = true;
+                BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "Порт2 был открыт\r\n" });
                 return;
             }
             catch (Exception ex)
@@ -1535,40 +1535,57 @@ namespace main_application
                 MessageBox.Show(ex.Message, serialPort2.PortName);
                 return;
             }
-
         }
-        #endregion
 
         /************************************************************
-                       ПРОВЕРКА СОСТОЯНИЯ ЛИНИЙ CD и DSR
+                       ПРОВЕРКА СОСТОЯНИЯ ПОРТОВ
         ************************************************************/
+
         // Делегат используется для записи в UI control из потока не-UI
         private delegate void SetPortState(string text);
         public void setport1state(string text)
-        {
-            port1state_label.Text = text;
-        }
-        public void setport2state(string text)
-        {
-            port2state_label.Text = text;
-        }
+        { port1state_label.Text = text; }
 
+        public void setport2state(string text)
+        { port2state_label.Text = text; }
+
+        //Мониторит физическое состояние портов
         public void serial1_monitor()
         {
             while (true)
             {
                 if (serialPort1.IsOpen)
                 {
-                    if (serialPort1.CDHolding || serialPort1.DsrHolding)
+                    try
                     {
-                        BeginInvoke(new SetTextDeleg(setport1state), new object[] { "Подключен" });
+                        if (serialPort1.CDHolding || serialPort1.DsrHolding)
+                        {
+                            BeginInvoke(new SetTextDeleg(setport1state), new object[] { "Подключен" });
+                            Phys_status1_mutex.WaitOne();
+                            Phys_status1 = Connection_Status.CONNECTED;
+                            Phys_status1_mutex.ReleaseMutex();
+                        }
+                        else {
+                            BeginInvoke(new SetTextDeleg(setport1state), new object[] { "Отключен" });
+                            Phys_status1_mutex.WaitOne();
+                            Phys_status1 = Connection_Status.CONNECTION_WAIT;
+                            Phys_status1_mutex.ReleaseMutex();
+                        }
                     }
-                    else { BeginInvoke(new SetTextDeleg(setport1state), new object[] { "Отключен" }); }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(ex.Data.ToString(), "Error!");
+                    }
                 }
-
+                else
+                {
+                    BeginInvoke(new SetTextDeleg(setport1state), new object[] { "Порт1 закрыт" });
+                    Phys_status1_mutex.WaitOne();
+                    Phys_status1 = Connection_Status.DISCONNECTED;
+                    Phys_status1_mutex.ReleaseMutex();
+                }
                 Thread.Sleep(200);
             }
-
         }
         public void serial2_monitor()
         {
@@ -1576,12 +1593,35 @@ namespace main_application
             {
                 if (serialPort2.IsOpen)
                 {
-                    if (serialPort2.CDHolding || serialPort2.DsrHolding)
+                    try
                     {
-                        BeginInvoke(new SetTextDeleg(setport2state), new object[] { "Подключен" });
+                        if (serialPort2.CDHolding || serialPort2.DsrHolding)
+                        {
+                            BeginInvoke(new SetTextDeleg(setport2state), new object[] { "Подключен" });
+                            Phys_status2_mutex.WaitOne();
+                            Phys_status2 = Connection_Status.CONNECTED;
+                            Phys_status2_mutex.ReleaseMutex();
+                        }
+                        else {
+                            BeginInvoke(new SetTextDeleg(setport2state), new object[] { "Отключен" });
+                            Phys_status2_mutex.WaitOne();
+                            Phys_status2 = Connection_Status.CONNECTION_WAIT;
+                            Phys_status2_mutex.ReleaseMutex();
+                        }
                     }
-                    else { BeginInvoke(new SetTextDeleg(setport2state), new object[] { "Отключен" }); }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(ex.Data.ToString(), "Error!");
+                    }
                 }
+                else
+                {
+                    BeginInvoke(new SetTextDeleg(setport2state), new object[] { "Порт2 закрыт" });
+                    Phys_status2_mutex.WaitOne();
+                    Phys_status2 = Connection_Status.DISCONNECTED;
+                    Phys_status2_mutex.ReleaseMutex();
+                }
+
 
                 Thread.Sleep(200);
             }
@@ -1590,16 +1630,14 @@ namespace main_application
 
         //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^//
 
-
-
-
-        /************************************************************
+        /***********************************************************
+        ************************************************************
                          ЗДЕСЬ НАЧАЛО ВСЕГО
         ************************************************************/
 
         private void button1_Click(object sender, EventArgs e)
         {
-
+            //Открытие портов
             Thread SerOpenthread1 = new Thread(OpenSerial1);
             Thread SerOpenthread2 = new Thread(OpenSerial2);
             SerOpenthread1.IsBackground = true;
@@ -1610,30 +1648,23 @@ namespace main_application
 
             if (!serialPort1.IsOpen || !serialPort2.IsOpen)
             {
-                MessageBox.Show("Не удалось открыть порты", "Warning");
+                if (DEBUG_MODE) MessageBox.Show("Не удалось открыть порты", "Warning");
+
+                if (serialPort1.IsOpen) serialPort1.Close();
+                if (serialPort2.IsOpen) serialPort2.Close();
+                BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "Не удалось открыть порты\r\n" });
                 return;
             }
-            else
-            {
+            this.button1.Enabled = false;
+            this.button4.Enabled = true;
 
-                DateTime foo = DateTime.UtcNow;
-                long unixTime = ((DateTimeOffset)foo).ToUnixTimeSeconds();
-                string timestamp = unixTime.ToString();
-                //Отметка локального времени
-                Computers_Timestamps["local"] = timestamp;
-            }
-
-
-            Thread Channel_Trackerthr = new Thread(Channel_Tracker);
-            Channel_Trackerthr.IsBackground = true;
-            Channel_Trackerthr.Start();
 
             //После запуска потока, метод StartReceiving Осуществляет прием из входного буфера в программный буфер принятых байтов
             Thread ReceiverThr1 = new Thread(Serial1_StartReceiving);
             ReceiverThr1.IsBackground = true;
             ReceiverThr1.Start();
 
-            //FindFrame просматривает програмный буфер принятых байтов и составляет кадры, зате помещает  в список кадров(заданий)
+            //FindFrame просматривает програмный буфер принятых байтов и составляет кадры, затем помещает  в список кадров(заданий)
             Thread ParseFrameThr1 = new Thread(FindFrameInPort1);
             ParseFrameThr1.IsBackground = true;
             ParseFrameThr1.Start();
@@ -1648,6 +1679,8 @@ namespace main_application
             ParseFrameThr2.IsBackground = true;
             ParseFrameThr2.Start();
 
+            //Потоки нужны для определения состояния абонентов на физическом уровне
+            //Состояние пишут в UI и в Phys_status 1|2
             Thread serial1_mon_thr = new Thread(serial1_monitor);
             serial1_mon_thr.IsBackground = true;
             serial1_mon_thr.Start();
@@ -1656,50 +1689,40 @@ namespace main_application
             serial2_mon_thr.IsBackground = true;
             serial2_mon_thr.Start();
 
+            //Обработка заданий, принятых из портов
             Thread TaskHandlerThr = new Thread(TaskHandler);
             TaskHandlerThr.IsBackground = true;
             TaskHandlerThr.Start();
 
+            //Обработка заданий на отправку
             Thread TaskToSendHandlerThr = new Thread(TaskToSendHandler);
             TaskToSendHandlerThr.IsBackground = true;
             TaskToSendHandlerThr.Start();
 
-            /*^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-                Запуск потоков для приема кадров в систему
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^*/
-
-            //Здесь запуск функции выполнения заданий
-            //Метод просматривает очередь заданий, вырезает самое старое задание, затем выполняет его, мспользуя отдельные функции
-
-            //После открытия портов необходимо 10 раз отправить 
-            //кадр для установления логического соединения "MEETING",
-            //Ожидая ответа от соседней машины
-
-            // Thread thrinfo = Thread.CurrentThread;
-            // string thr = thrinfo.IsAlive.ToString();
-            // BeginInvoke(new SetTextDeleg(settextbox1), new object[] { thr });
         }
         //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^//
 
+        //При закрытии формы порты тоже закрываются
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            if (serialPort1.IsOpen)
-            { serialPort1.Close(); }
-            if (serialPort2.IsOpen)
-            { serialPort2.Close(); }
+            while (serialPort1.IsOpen || serialPort2.IsOpen)
+            {
+                if (serialPort1.IsOpen)
+                {
+                    serialPort1.Close();
+                }
+
+                if (serialPort2.IsOpen)
+                {
+                    serialPort2.Close();
+                }
+
+            }
         }
-
-
-
 
         /***************************************************************************
                             ВЫПОЛНЕНИЕ ЗАДАНИЙ НА ОТПРАВКУ 
         ***************************************************************************/
-
-        // Больше ничего писать не надо
-        // Внимание. При попытке передать данные в отключенный порт принимающей стороны,
-        // поток не будет продолжен, пока локальная машина не передаст данные
-        // мб следует отключить flow control = dtr/cts -> flow control = None
         public void TaskToSendHandler()
         {
             while (true)
@@ -1723,16 +1746,13 @@ namespace main_application
                         { MessageBox.Show(ex.ToString(), "Error!"); }
                     }
                     else if (PortName == "Port2")
-
                     {
                         try
                         { serialPort2.Write(WIN1251.GetString(frametosend)); }
                         catch (Exception ex)
                         { MessageBox.Show(ex.ToString(), "Error!"); }
                     }
-
                     else { MessageBox.Show("TaskToSendHandler() Нет такого порта", "Error!"); }
-
                 }
                 else {
                     TaskToSend_mutex.ReleaseMutex();
@@ -1741,136 +1761,12 @@ namespace main_application
                 Thread.Sleep(20);
             }
         }
-
         /*
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-                             ВЫПОЛНЕНИЕ ЗАДАНИЙ НА ОТПРАВКУ 
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        */
-
-        //назначение функции- отсылать timestamp локальной машины в два других порта, до тех пор, пока не будет получена квитанция 1,2
-        public void Establish_physical()
-        {
-
-            string timestamp = Computers_Timestamps["local"];
-            Ack1_mutex.WaitOne();
-            Ack1_awaited = 0;
-            Ack1_mutex.ReleaseMutex();
-
-            Ack2_mutex.WaitOne();
-            Ack2_awaited = 0;
-            Ack2_mutex.ReleaseMutex();
-            int ack1;
-            int ack2;
-            int counter = 0;
-            while (true)
-            {
-                //Начальная попытка отправить meeting
-                if (counter == 0)
-                {
-                    Ack1_mutex.WaitOne();
-                    ack1 = Ack1_awaited;
-                    Ack1_mutex.ReleaseMutex();
-
-                    Ack2_mutex.WaitOne();
-                    ack2 = Ack2_awaited;
-                    Ack2_mutex.ReleaseMutex();
-                    if (ack1 == 0 && ack2 == 0)
-                    {
-                        TaskToSend_mutex.WaitOne();
-                        byte[] frame1 = CreateNewFrame(FrameType.MEETING, "0", (timestamp.Length).ToString(), "0", timestamp);
-                        TasksToSend.Add(new One_Task("Port1", frame1));
-
-                        Ack1_mutex.WaitOne();
-                        Ack1_awaited = 1;
-                        Ack1_mutex.ReleaseMutex();
-
-                        TaskToSend_mutex.ReleaseMutex();
-                        counter++;
-                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { " Попыток соединения (пк на порт1) : " + counter.ToString() + "\r\n" });
-
-
-                        TaskToSend_mutex.WaitOne();
-                        byte[] frame2 = CreateNewFrame(FrameType.MEETING, "0", (timestamp.Length).ToString(), "0", timestamp);
-                        TasksToSend.Add(new One_Task("Port2", frame2));
-
-                        Ack2_mutex.WaitOne();
-                        Ack2_awaited = 1;
-                        Ack2_mutex.ReleaseMutex();
-
-                        TaskToSend_mutex.ReleaseMutex();
-                        counter++;
-                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { " Попыток соединения (пк на порт2) : " + counter.ToString() + "\r\n" });
-                        Thread.Sleep(4000);
-                        continue;
-                    }
-
-                }
-                if (counter < 10 && counter != 0)
-                {
-                    Ack1_mutex.WaitOne();
-                    ack1 = Ack1_awaited;
-                    Ack1_mutex.ReleaseMutex();
-
-                    Ack2_mutex.WaitOne();
-                    ack2 = Ack2_awaited;
-                    Ack2_mutex.ReleaseMutex();
-                    if (ack1 == 0 && ack2 == 0)
-                    {
-                        Channel_status_mutex.WaitOne();
-                        Channel_status["ACK1"] = "Received";
-                        Channel_status_mutex.ReleaseMutex();
-
-                        Channel_status_mutex.WaitOne();
-                        Channel_status["ACK2"] = "Received";
-                        Channel_status_mutex.ReleaseMutex();
-
-                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "Переданные данные доставлены  \r\n" });
-                        return;
-                    }
-                    if (ack1 == 1)
-                    {
-                        TaskToSend_mutex.WaitOne();
-                        byte[] frame1 = CreateNewFrame(FrameType.MEETING, "0", (timestamp.Length).ToString(), "0", timestamp);
-                        TasksToSend.Add(new One_Task("Port1", frame1));
-
-                        Ack1_mutex.WaitOne();
-                        Ack1_awaited = 1;
-                        Ack1_mutex.ReleaseMutex();
-
-                        TaskToSend_mutex.ReleaseMutex();
-                        counter++;
-                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { " Попыток соединения (пк на порт1) : " + counter.ToString() + "\r\n" });
-
-                    }
-                    if (ack2 == 1)
-                    {
-                        TaskToSend_mutex.WaitOne();
-                        byte[] frame2 = CreateNewFrame(FrameType.MEETING, "0", (timestamp.Length).ToString(), "0", timestamp);
-                        TasksToSend.Add(new One_Task("Port2", frame2));
-
-                        Ack2_mutex.WaitOne();
-                        Ack2_awaited = 1;
-                        Ack2_mutex.ReleaseMutex();
-
-                        TaskToSend_mutex.ReleaseMutex();
-                        counter++;
-                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { " Попыток соединения (пк на порт2) : " + counter.ToString() + "\r\n" });
-
-                    }
-                }
-                else if (counter != 0)
-                {
-                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { " Соединение не удалось. Попыток: " + counter.ToString() + "\r\n" });
-                    return;
-                }
-                Thread.Sleep(4000);
-            }
-        }
-
-        //Отсылает логины, ждет ack
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^*/
+        // По кнопке начинает отсылать логины
         public void Establish_Logical()
         {
+            //Получение локальногго логина
             AuthData_mutex.WaitOne();
             string local_auth_name = AuthData["local"];
             AuthData_mutex.ReleaseMutex();
@@ -1886,19 +1782,23 @@ namespace main_application
             int ack1;
             int ack2;
             int counter = 0;
-
             while (true)
             {
                 Auth_status_mutex.WaitOne();
-                string s1, s2, sl;
+                string s1, s2;
                 s1 = Auth_status["ACK1"];
                 s2 = Auth_status["ACK2"];
-
                 Auth_status_mutex.ReleaseMutex();
+
+                //Если ACK1 или ACK2 были получены то прерываем попытки отправлять логины
                 if (s1 != "undef" && s2 != "undef")
                 {
+                    BeginInvoke(new SetTextDeleg(addtotextbox1),
+                        new object[] { "Локальный логин был доставлен \r\n" });
+                    Thread.Sleep(100);
                     return;
                 }
+
                 //Начальная попытка отправить LOGIN
                 if (counter == 0)
                 {
@@ -1910,25 +1810,32 @@ namespace main_application
                     ack2 = Ack2_awaited_Auth;
                     Ack2_mutex_Auth.ReleaseMutex();
 
+                    //Если это первая попытка отправки, то в порты отсылаются логины
                     if (ack1 == 0 && ack2 == 0)
                     {
                         TaskToSend_mutex.WaitOne();
-                        byte[] frame1 = CreateNewFrame(FrameType.LOGIN, "0", (local_auth_name.Length).ToString(), "0", local_auth_name);
+                        byte[] frame1 = CreateNewFrame(FrameType.LOGIN, "0",
+                            (local_auth_name.Length).ToString(), "0", local_auth_name);
                         TasksToSend.Add(new One_Task("Port1", frame1));
 
+                        //Установка флага, что ожидается ack1
                         Ack1_mutex_Auth.WaitOne();
                         Ack1_awaited_Auth = 1;
                         Ack1_mutex_Auth.ReleaseMutex();
 
                         TaskToSend_mutex.ReleaseMutex();
+
                         counter++;
-                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { " Попыток логин соединения (пк на порт1) : " + counter.ToString() + "\r\n" });
+                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] {
+                            " Попыток логин соединения (пк на порт1) : " + counter.ToString() + "\r\n" });
 
 
                         TaskToSend_mutex.WaitOne();
-                        byte[] frame2 = CreateNewFrame(FrameType.LOGIN, "0", (local_auth_name.Length).ToString(), "0", local_auth_name);
+                        byte[] frame2 = CreateNewFrame(FrameType.LOGIN, "0",
+                            (local_auth_name.Length).ToString(), "0", local_auth_name);
                         TasksToSend.Add(new One_Task("Port2", frame2));
 
+                        //Установка флага, что ожидается ack2
                         Ack2_mutex_Auth.WaitOne();
                         Ack2_awaited_Auth = 1;
                         Ack2_mutex_Auth.ReleaseMutex();
@@ -1939,10 +1846,12 @@ namespace main_application
                         Thread.Sleep(4000);
                         continue;
                     }
-
                 }
+
+                // Повторные попытки отправить логин
                 if (counter < 10 && counter != 0)
                 {
+                    //Получение текущего статуса доставки
                     Ack1_mutex_Auth.WaitOne();
                     ack1 = Ack1_awaited_Auth;
                     Ack1_mutex_Auth.ReleaseMutex();
@@ -1950,6 +1859,8 @@ namespace main_application
                     Ack2_mutex_Auth.WaitOne();
                     ack2 = Ack2_awaited_Auth;
                     Ack2_mutex_Auth.ReleaseMutex();
+
+                    //Если ack 1&2 были получены
                     if (ack1 == 0 && ack2 == 0)
                     {
                         Auth_status_mutex.WaitOne();
@@ -1959,10 +1870,11 @@ namespace main_application
                         Auth_status_mutex.WaitOne();
                         Auth_status["ACK2"] = "Received";
                         Auth_status_mutex.ReleaseMutex();
-                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "Переданные логины доставлены  \r\n" });
 
+                        BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "Переданные логины доставлены  \r\n" });
                         return;
                     }
+
                     if (ack1 == 1)
                     {
                         TaskToSend_mutex.WaitOne();
@@ -1978,6 +1890,7 @@ namespace main_application
                         BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { " Попыток передать логин (пк на порт1) : " + counter.ToString() + "\r\n" });
 
                     }
+
                     if (ack2 == 1)
                     {
                         TaskToSend_mutex.WaitOne();
@@ -2003,14 +1916,107 @@ namespace main_application
             }
         }
 
-
-        private void button3_Click(object sender, EventArgs e)
+        private delegate void Set_ButtonState(bool text);
+        public void Set_AuthDisconnectButton(bool state)
         {
-            Thread connect_physthr = new Thread(Establish_physical);
-            connect_physthr.Start();
+            this.AuthDisconnectButton.Enabled = state;
+        }
+        public void Set_AuthConnectButton(bool state)
+        {
+            this.AuthConnectButton.Enabled = state;
+        }
+
+        // Поток, следящий за Авторизацией
+        // Если пользователи авторизованы в сети, тогда дается уведомление и заполняется список юзверей 
+        public void Auth_Tracker()
+        {
+            bool stat = false;
+            while (true)
+            {
+                Auth_status_mutex.WaitOne();
+                if (Auth_status["ACK1"] != "undef" && Auth_status["ACK_local"] != "undef" && Auth_status["ACK2"] != "undef")
+                { stat = true; }
+                Auth_status_mutex.ReleaseMutex();
+                if (stat == true)
+                {
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]{
+                        "Авторизация всех пользователей прошла успешно\r\n" });
+                    BeginInvoke(new FillComboBoxDeleg(FillReceiverComboBox), new object[] { });
+
+                    BeginInvoke(new Set_ButtonState(Set_AuthConnectButton), new object[] { false });
+                    BeginInvoke(new Set_ButtonState(Set_AuthDisconnectButton), new object[] { true });
+                    return;
+                }
+                Thread.Sleep(200);
+            }
+        }
+
+        //Кнопка попытки авторизации
+        private void AuthConnectButton_Click(object sender, EventArgs e)
+        {
+            //Получение значений статуса физ подключения (берется из serial_monitor) 
+            Phys_status1_mutex.WaitOne();
+            Connection_Status local_status1 = Phys_status1;
+            Phys_status1_mutex.ReleaseMutex();
+
+            Phys_status2_mutex.WaitOne();
+            Connection_Status local_status2 = Phys_status2;
+            Phys_status2_mutex.ReleaseMutex();
+
+            if (local_status1 != Connection_Status.CONNECTED || local_status2 != Connection_Status.CONNECTED)
+            {
+                BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "Проверьте физическое соединение \r\n" });
+                return;
+            }
+
+            //Получение логина
+            string local_login = LogintextBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(local_login))
+            {
+                BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "Проверьте введенный логин \r\n" });
+                return;
+            }
+            else
+            {
+                AuthData_mutex.WaitOne();
+                AuthData["local"] = local_login;
+                AuthData_mutex.ReleaseMutex();
+            }
+            //Запуск потока, следящего за ходом авторизации
+            Thread Auth_Trackerthr = new Thread(Auth_Tracker);
+            Auth_Trackerthr.IsBackground = true;
+            Auth_Trackerthr.Start();
+
+            //Попытка отправить свой логин 
+            Thread connect_logicalthr = new Thread(Establish_Logical);
+            connect_logicalthr.Start();
 
         }
 
+        //Кнопка деавторизации, Disconnect
+        private void AuthDisconnectButton_click(object sender, EventArgs e)
+        {
+            AuthData_mutex.WaitOne();
+            AuthData["local"] = null;
+            AuthData["Port1"] = null;
+            AuthData["Port2"] = null;
+            AuthData_mutex.ReleaseMutex();
+            Auth_status_mutex.WaitOne();
+            Auth_status["ACK1"] = "undef";
+            Auth_status["ACK2"] = "undef";
+            Auth_status["ACK_local"] = "undef";
+            Auth_status_mutex.ReleaseMutex();
+
+            TaskToSend_mutex.WaitOne();
+            TasksToSend.Add(new One_Task("Port1", CreateNewFrame(FrameType.LOGOUT, "0", null, "0", null, false)));
+            TasksToSend.Add(new One_Task("Port2", CreateNewFrame(FrameType.LOGOUT, "0", null, "0", null, false)));
+            TaskToSend_mutex.ReleaseMutex();
+
+            BeginInvoke(new SetTextDeleg(addtotextbox1), new object[] { "Вы были деавторизованы\r\n" });
+            this.AuthDisconnectButton.Enabled = false;
+            this.AuthConnectButton.Enabled = true;
+
+        }
         private void toolStripComboBox1_SelectedIndexChanged(object sender, EventArgs e)
         {
             string selectedState = toolStripComboBox1.SelectedItem.ToString();
@@ -2038,7 +2044,6 @@ namespace main_application
         //Закрытие портов
         private void button4_Click(object sender, EventArgs e)
         {
-
             if (serialPort1.IsOpen)
             {
                 try
@@ -2046,7 +2051,9 @@ namespace main_application
                     serialPort1.Handshake = Handshake.None;
                     Thread.Sleep(300);
                     serialPort1.Close();
-                    MessageBox.Show("Порт 1 был Закрыт", "Error!");
+                    if (DEBUG_MODE) MessageBox.Show("Порт 1 был Закрыт", "Error!");
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]{
+                        "Порт 1 был Закрыт\r\n" });
                     serialPort1.Handshake = Handshake.RequestToSend;
 
                 }
@@ -2055,16 +2062,16 @@ namespace main_application
                     MessageBox.Show(ex.ToString(), "Error!");
                 }
             }
-
             if (serialPort2.IsOpen)
             {
                 try
                 {
-
                     serialPort2.Handshake = Handshake.None;
                     Thread.Sleep(300);
                     serialPort2.Close();
-                    MessageBox.Show("Порт 2 был Закрыт", "Error!");
+                    if (DEBUG_MODE) MessageBox.Show("Порт 2 был Закрыт", "Error!");
+                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]{
+                        "Порт 2 был Закрыт\r\n" });
                     serialPort2.Handshake = Handshake.RequestToSend;
                 }
                 catch (Exception ex)
@@ -2072,97 +2079,22 @@ namespace main_application
                     MessageBox.Show(ex.ToString(), "Error!");
                 }
             }
-
+            if (!serialPort1.IsOpen && !serialPort1.IsOpen)
+            {
+                this.button1.Enabled = true;
+                this.button4.Enabled = false;
+            }
         }
 
         /*************************************************************************
                             ОТКРЫТИЕ ПАПОК С ПИСЬМАМИ
         **************************************************************************/
-
-        public void Channel_Tracker()
-        {
-            bool stat = false;
-            bool local_auth_ready = false;
-            bool form_was_shown = false;
-            while (true)
-            {
-                Channel_status_mutex.WaitOne();
-                string st1 = Channel_status["ACK1"];
-                string st2 = Channel_status["ACK2"];
-                string st_loc = Channel_status["ACK_local"];
-                Channel_status_mutex.ReleaseMutex();
-
-
-                if ((st1 != "undef" && st2 != "undef" && st_loc != "undef") && local_auth_ready == false && form_was_shown == false)
-                {
-                    AuthForm form = new AuthForm(this);
-                    form.ShowDialog();
-                    stat = true;
-                    form_was_shown = true;
-                }
-
-                AuthData_mutex.WaitOne();
-                string local_auth = AuthData["local"];
-                AuthData_mutex.ReleaseMutex();
-
-                if ((local_auth != null) && (stat == true))
-                {
-                    local_auth_ready = true;
-                }
-
-                if (stat == true && local_auth_ready == true && form_was_shown == true)
-                {
-                    //Запуск попыток переслать свой логин 
-                    Thread Establish_Logicalthr = new Thread(Establish_Logical);
-                    Establish_Logicalthr.IsBackground = true;
-                    Establish_Logicalthr.Start();
-
-                    Thread Auth_Trackerthr = new Thread(Auth_Tracker);
-                    Auth_Trackerthr.IsBackground = true;
-                    Auth_Trackerthr.Start();
-
-                    BeginInvoke(new SetTextDeleg(settextlabel4), new object[] { local_auth });
-
-                    return;
-                }
-                Thread.Sleep(200);
-            }
-
-        }
-
-        //Поток, следящий за Авторизацией
-        public void Auth_Tracker()
-        {
-            bool stat = false;
-            while (true)
-            {
-                Auth_status_mutex.WaitOne();
-                if (Auth_status["ACK1"] != "undef" && Auth_status["ACK_local"] != "undef" && Auth_status["ACK2"] != "undef")
-                {
-                    stat = true;
-                }
-                Auth_status_mutex.ReleaseMutex();
-                if (stat == true)
-                {
-
-                    BeginInvoke(new SetTextDeleg(addtotextbox1), new object[]
-                                       { "Авторизация всех пользователей прошла успешно \r\n" });
-                    BeginInvoke(new FillComboBoxDeleg(FillReceiverComboBox), new object[] { });
-
-                    return;
-                }
-                Thread.Sleep(200);
-            }
-
-        }
-
         //Открытие папки входящие
         private void входящиеToolStripMenuItem_Click(object sender, EventArgs e)
         {
             Form2 inbox_folder = new Form2(this);
             inbox_folder.Show();
         }
-
         //Инициация обновления формы inbox
         private void button2_Click(object sender, EventArgs e)
         {
@@ -2170,14 +2102,12 @@ namespace main_application
             Inbox_update_needed = true;
             Inbox_update_mutex.ReleaseMutex();
         }
-
         //Открытие папки исходящие
         private void исходящиеToolStripMenuItem_Click(object sender, EventArgs e)
         {
             Form3 outbox_folder = new Form3(this);
             outbox_folder.Show();
         }
-
         //Инициация обновления формы outbox
         private void button5_Click(object sender, EventArgs e)
         {
@@ -2185,25 +2115,13 @@ namespace main_application
             Outbox_update_needed = true;
             Outbox_update_mutex.ReleaseMutex();
         }
-
-        private void button6_Click(object sender, EventArgs e)
+        private void toolStripMenuItem2_Click(object sender, EventArgs e)
         {
-            //{"id":"1","re":"Shalom, jay son","msg":"Json desialize test","status":"Отправлено"}
-            string str = LetterTextBox.Text;
-            //outbox_class outbox_letter;
-            //outbox_class json_letter = JsonConvert.DeserializeObject<outbox_class>(str);
-            byte[] utf8bytes = Encoding.UTF8.GetBytes(str);
-            byte[] win1251Bytes = Encoding.Convert(Encoding.UTF8, WIN1251, utf8bytes);
-            string win1251string = WIN1251.GetString(win1251Bytes);
-
-
-            List<string> a = new List<string>();
-            for (int i = 0; i < win1251Bytes.Length; i++)
-            {
-                a.Add((win1251Bytes[i]).ToString("X2"));
-            }
-            textBox1.Text = "$" + String.Join("$", a.ToArray());
-            string len = LetterTextBox.Text.Length.ToString();
+            MessageBox.Show(
+                "Работу выполнили:\r\n" +
+                "    Пупчин П.Н.\r\n" +
+                "    Пирмамедов М.Э.\r\n" +
+                "    Сметанкин К.И.", "Справка");
         }
     }
 }
